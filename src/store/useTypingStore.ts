@@ -1,5 +1,6 @@
-// src/store/useTypingStore.ts
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { STORAGE_KEY } from "../constants";
 
 export type Mode = "words" | "sentences";
 
@@ -20,14 +21,15 @@ interface TypingState {
   incorrectWords: IncorrectEntry[];
   mode: Mode;
   speechRate: number;
+  isPracticing: boolean;
 
-  // 추상화된 액션
   updateInputText: (text: string) => void;
   updateTypedWord: (text: string) => void;
   switchMode: (mode: Mode) => void;
   changeSpeechRate: (rate: number) => void;
 
   startPractice: (words: string[]) => void;
+  stopPractice: () => void;
   submitAnswer: (input: string) => void;
 }
 
@@ -46,83 +48,107 @@ const generateSentences = (words: string[]): string[] => {
   ]);
 };
 
-export const useTypingStore = create<TypingState>((set, get) => ({
-  inputText: "",
-  shuffledWords: [],
-  sentences: [],
-  currentWordIndex: 0,
-  currentSentenceIndex: 0,
-  typedWord: "",
-  correctCount: 0,
-  incorrectCount: 0,
-  incorrectWords: [],
-  mode: "words",
-  speechRate: 1,
-
-  // 추상화된 setter
-  updateInputText: (text) => set({ inputText: text }),
-  updateTypedWord: (text) => set({ typedWord: text }),
-  switchMode: (mode) => set({ mode }),
-  changeSpeechRate: (rate) => set({ speechRate: rate }),
-
-  // 연습 시작
-  startPractice: (words) => {
-    set({
-      shuffledWords: [...words].sort(() => Math.random() - 0.5),
-      sentences: generateSentences(words).sort(() => Math.random() - 0.5),
+export const useTypingStore = create<TypingState>()(
+  persist(
+    (set, get) => ({
+      inputText: "",
+      shuffledWords: [],
+      sentences: [],
       currentWordIndex: 0,
       currentSentenceIndex: 0,
       typedWord: "",
       correctCount: 0,
       incorrectCount: 0,
       incorrectWords: [],
-    });
-  },
+      mode: "words",
+      speechRate: 1,
+      isPracticing: false,
 
-  // 제출 처리
-  submitAnswer: (input) => {
-    const {
-      mode,
-      shuffledWords,
-      sentences,
-      currentWordIndex,
-      currentSentenceIndex,
-    } = get();
+      updateInputText: (text) => set({ inputText: text }),
+      updateTypedWord: (text) => set({ typedWord: text }),
+      switchMode: (mode) => set({ mode }),
+      changeSpeechRate: (rate) => set({ speechRate: rate }),
 
-    const trimmedInput = removeWhitespace(input);
-    const target =
-      mode === "words"
-        ? removeWhitespace(shuffledWords[currentWordIndex])
-        : removeWhitespace(sentences[currentSentenceIndex]);
+      startPractice: (words) => {
+        set({
+          shuffledWords: [...words].sort(() => Math.random() - 0.5),
+          sentences: generateSentences(words).sort(() => Math.random() - 0.5),
+          currentWordIndex: 0,
+          currentSentenceIndex: 0,
+          typedWord: "",
+          correctCount: 0,
+          incorrectCount: 0,
+          incorrectWords: [],
+          isPracticing: true,
+        });
+      },
 
-    const isCorrect = trimmedInput === target;
+      stopPractice: () => {
+        set({
+          shuffledWords: [],
+          sentences: [],
+          currentWordIndex: 0,
+          currentSentenceIndex: 0,
+          typedWord: "",
+          isPracticing: false,
+        });
+      },
 
-    set((state) => ({
-      correctCount: isCorrect ? state.correctCount + 1 : state.correctCount,
-      incorrectCount: !isCorrect
-        ? state.incorrectCount + 1
-        : state.incorrectCount,
-      incorrectWords: !isCorrect
-        ? [
-            ...state.incorrectWords,
-            {
-              word:
-                mode === "words"
-                  ? shuffledWords[currentWordIndex]
-                  : sentences[currentSentenceIndex],
-              typed: input.trim(),
-            },
-          ]
-        : state.incorrectWords,
-      currentWordIndex:
-        mode === "words"
-          ? (currentWordIndex + 1) % shuffledWords.length
-          : currentWordIndex,
-      currentSentenceIndex:
-        mode === "sentences"
-          ? (currentSentenceIndex + 1) % sentences.length
-          : currentSentenceIndex,
-      typedWord: "",
-    }));
-  },
-}));
+      submitAnswer: (input) => {
+        const {
+          mode,
+          shuffledWords,
+          sentences,
+          currentWordIndex,
+          currentSentenceIndex,
+        } = get();
+
+        const trimmedInput = removeWhitespace(input);
+        const target =
+          mode === "words"
+            ? removeWhitespace(shuffledWords[currentWordIndex])
+            : removeWhitespace(sentences[currentSentenceIndex]);
+
+        const isCorrect = trimmedInput === target;
+
+        set((state) => ({
+          correctCount: isCorrect ? state.correctCount + 1 : state.correctCount,
+          incorrectCount: !isCorrect
+            ? state.incorrectCount + 1
+            : state.incorrectCount,
+          incorrectWords: !isCorrect
+            ? [
+                ...state.incorrectWords,
+                {
+                  word:
+                    mode === "words"
+                      ? shuffledWords[currentWordIndex]
+                      : sentences[currentSentenceIndex],
+                  typed: input.trim(),
+                },
+              ]
+            : state.incorrectWords,
+          currentWordIndex:
+            mode === "words"
+              ? (currentWordIndex + 1) % shuffledWords.length
+              : currentWordIndex,
+          currentSentenceIndex:
+            mode === "sentences"
+              ? (currentSentenceIndex + 1) % sentences.length
+              : currentSentenceIndex,
+          typedWord: "",
+        }));
+      },
+    }),
+    {
+      name: STORAGE_KEY,
+      partialize: (state) => ({
+        inputText: state.inputText,
+        incorrectWords: state.incorrectWords,
+        correctCount: state.correctCount,
+        incorrectCount: state.incorrectCount,
+        isPracticing: state.isPracticing,
+      }),
+    }
+  )
+);

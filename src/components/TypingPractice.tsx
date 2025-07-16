@@ -19,7 +19,9 @@ export default function TypingPractice() {
     updateTypedWord,
     switchMode,
     changeSpeechRate,
+    isPracticing,
     startPractice,
+    stopPractice,
     submitAnswer,
   } = useTypingStore();
 
@@ -41,10 +43,14 @@ export default function TypingPractice() {
     }
   };
 
-  const handleStartPractice = () => {
-    const words = inputText.trim().split("/").filter(Boolean);
-    if (words.length > 0) {
-      startPractice(words);
+  const handleStartOrStopPractice = () => {
+    if (isPracticing) {
+      stopPractice();
+    } else {
+      const words = inputText.trim().split("/").filter(Boolean);
+      if (words.length > 0) {
+        startPractice(words);
+      }
     }
   };
 
@@ -115,12 +121,15 @@ export default function TypingPractice() {
             value={inputText}
             onChange={handleTextareaChange}
           />
-
           <button
-            className="px-4 py-2 bg-blue-500 text-white rounded"
-            onClick={handleStartPractice}
+            className={`px-4 py-2 rounded font-semibold transition ${
+              isPracticing
+                ? "bg-gray-500 text-white hover:bg-gray-600"
+                : "bg-blue-500 text-white hover:bg-blue-600"
+            }`}
+            onClick={handleStartOrStopPractice}
           >
-            연습 시작
+            {isPracticing ? "연습 종료" : "연습 시작"}
           </button>
         </div>
         <div className="flex-1 space-y-4">
