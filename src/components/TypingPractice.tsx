@@ -1,5 +1,6 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect } from "react";
 import { useTypingStore } from "../store/useTypingStore";
+import { savedText1 } from "../constants";
 
 export default function TypingPractice() {
   const {
@@ -47,6 +48,20 @@ export default function TypingPractice() {
     }
   };
 
+  const handleLoadPreset = (slot: number) => {
+    switch (slot) {
+      case 1:
+        updateInputText(savedText1);
+        break;
+      case 2:
+      case 3:
+      case 4:
+      case 5:
+      default:
+        break;
+    }
+  };
+
   useEffect(() => {
     if (mode === "words" && shuffledWords.length > 0) {
       speakText(shuffledWords[currentWordIndex]);
@@ -63,6 +78,17 @@ export default function TypingPractice() {
 
       <div className="flex flex-col lg:flex-row gap-24">
         <div className="flex-1 space-y-4">
+          <div className="flex gap-2 mb-2">
+            {[1, 2, 3, 4, 5].map((num) => (
+              <button
+                key={num}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
+                onClick={() => handleLoadPreset(num)}
+              >
+                {num}
+              </button>
+            ))}
+          </div>
           <div className="flex gap-2">
             <button
               className={`px-4 py-2 rounded ${
