@@ -19,6 +19,8 @@ interface TypingState {
   correctCount: number;
   incorrectCount: number;
   incorrectWords: IncorrectEntry[];
+  totalCount: number;
+  progressCount: number;
   mode: Mode;
   speechRate: number;
   isPracticing: boolean;
@@ -60,6 +62,8 @@ export const useTypingStore = create<TypingState>()(
       correctCount: 0,
       incorrectCount: 0,
       incorrectWords: [],
+      totalCount: 0,
+      progressCount: 0,
       mode: "words",
       speechRate: 1,
       isPracticing: false,
@@ -79,6 +83,8 @@ export const useTypingStore = create<TypingState>()(
           correctCount: 0,
           incorrectCount: 0,
           incorrectWords: [],
+          totalCount: words.length,
+          progressCount: 0,
           isPracticing: true,
         });
       },
@@ -137,6 +143,7 @@ export const useTypingStore = create<TypingState>()(
               ? (currentSentenceIndex + 1) % sentences.length
               : currentSentenceIndex,
           typedWord: "",
+          progressCount: state.progressCount + 1,
         }));
       },
     }),
@@ -147,6 +154,8 @@ export const useTypingStore = create<TypingState>()(
         incorrectWords: state.incorrectWords,
         correctCount: state.correctCount,
         incorrectCount: state.incorrectCount,
+        totalCount: state.totalCount,
+        progressCount: state.progressCount,
         isPracticing: state.isPracticing,
         mode: state.mode,
         shuffledWords: state.shuffledWords,

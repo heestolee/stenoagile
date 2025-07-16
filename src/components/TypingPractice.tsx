@@ -13,6 +13,8 @@ export default function TypingPractice() {
     correctCount,
     incorrectCount,
     incorrectWords,
+    progressCount,
+    totalCount,
     mode,
     speechRate,
     updateInputText,
@@ -164,8 +166,10 @@ export default function TypingPractice() {
             onKeyDown={handleKeyDown}
           />
 
-          <p>
-            정답: {correctCount} | 오답: {incorrectCount}
+          <p className="text-sm font-medium">
+            <span className="text-blue-600">정답: {correctCount}</span> |{" "}
+            <span className="text-red-600">오답: {incorrectCount}</span> | 진행:{" "}
+            {progressCount} / {totalCount}
           </p>
 
           <div>
