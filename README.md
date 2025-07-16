@@ -1,1 +1,3 @@
-# Typing Practice
+# StenoAgile
+
+## Typing Practice
