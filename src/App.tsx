@@ -1,5 +1,7 @@
+import TypingPractice from "./components/TypingPractice";
+
 function App() {
-  return <div></div>;
+  return <TypingPractice />;
 }
 
 export default App;
