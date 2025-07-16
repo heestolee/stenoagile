@@ -116,7 +116,7 @@ export default function TypingPractice() {
 
           <textarea
             className="w-full p-2 border rounded"
-            rows={30}
+            rows={25}
             placeholder="연습할 단어들을 입력하세요 (/로 구분)"
             value={inputText}
             onChange={handleTextareaChange}
