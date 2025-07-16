@@ -1,45 +1,26 @@
-import {
-  useState,
-  useEffect,
-  type KeyboardEvent,
-  type ChangeEvent,
-} from "react";
-
-type Mode = "words" | "sentences";
-
-interface IncorrectEntry {
-  word: string;
-  typed: string;
-}
+import { type ChangeEvent, type KeyboardEvent, useEffect } from "react";
+import { useTypingStore } from "../store/useTypingStore";
 
 export default function TypingPractice() {
-  const [inputText, setInputText] = useState("");
-  const [shuffledWords, setShuffledWords] = useState<string[]>([]);
-  const [currentWordIndex, setCurrentWordIndex] = useState(0);
-  const [typedWord, setTypedWord] = useState("");
-  const [correctCount, setCorrectCount] = useState(0);
-  const [incorrectCount, setIncorrectCount] = useState(0);
-  const [incorrectWords, setIncorrectWords] = useState<IncorrectEntry[]>([]);
-  const [mode, setMode] = useState<Mode>("words");
-  const [sentences, setSentences] = useState<string[]>([]);
-  const [currentSentenceIndex, setCurrentSentenceIndex] = useState(0);
-  const [speechRate, setSpeechRate] = useState(1);
-
-  const removeWhitespace = (text: string): string => text.replace(/\s+/g, "");
-
-  const generateSentences = (words: string[]): string[] => {
-    if (words.length === 0) return ["연습할 단어를 입력하세요."];
-    return words.flatMap((word) => [
-      `최근 ${word}와 관련된 연구가 활발히 이루어지고 있습니다.`,
-      `문제를 분석할 때 ${word}의 개념을 적용해볼 수 있습니다.`,
-      `이런 접근 방식은 특히 ${word}에서 자주 쓰입니다.`,
-      `현대 사회에서 ${word}은 중요한 역할을 합니다.`,
-      `우리는 ${word}를 학습하며, ${word}에 대해 더 깊이 이해하게 됩니다.`,
-      `${word}는 시작이고, ${word}는 과정이며, ${word}는 결과입니다.`,
-      `많은 기업들이 핵심 역량으로 삼고 있는 것이 ${word}입니다.`,
-      `복잡해 보이지만 핵심은 언제나 ${word}입니다.`,
-    ]);
-  };
+  const {
+    inputText,
+    shuffledWords,
+    sentences,
+    currentWordIndex,
+    currentSentenceIndex,
+    typedWord,
+    correctCount,
+    incorrectCount,
+    incorrectWords,
+    mode,
+    speechRate,
+    updateInputText,
+    updateTypedWord,
+    switchMode,
+    changeSpeechRate,
+    startPractice,
+    submitAnswer,
+  } = useTypingStore();
 
   const speakText = (text: string) => {
     const utterance = new SpeechSynthesisUtterance(text);
@@ -47,72 +28,23 @@ export default function TypingPractice() {
     window.speechSynthesis.speak(utterance);
   };
 
-  const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    setInputText(event.target.value);
-  };
+  const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) =>
+    updateInputText(event.target.value);
 
-  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setTypedWord(event.target.value);
-  };
-
-  const handleWordInput = () => {
-    const target = removeWhitespace(shuffledWords[currentWordIndex]);
-    const input = removeWhitespace(typedWord);
-
-    if (input === target) {
-      setCorrectCount((prev) => prev + 1);
-    } else {
-      setIncorrectCount((prev) => prev + 1);
-      setIncorrectWords((prev) => [
-        ...prev,
-        { word: shuffledWords[currentWordIndex], typed: typedWord.trim() },
-      ]);
-    }
-
-    setCurrentWordIndex((prev) => (prev + 1) % shuffledWords.length);
-  };
-
-  const handleSentenceInput = () => {
-    const target = removeWhitespace(sentences[currentSentenceIndex]);
-    const input = removeWhitespace(typedWord);
-
-    if (input === target) {
-      setCorrectCount((prev) => prev + 1);
-    } else {
-      setIncorrectCount((prev) => prev + 1);
-      setIncorrectWords((prev) => [
-        ...prev,
-        { word: sentences[currentSentenceIndex], typed: typedWord.trim() },
-      ]);
-    }
-
-    setCurrentSentenceIndex((prev) => (prev + 1) % sentences.length);
-  };
+  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) =>
+    updateTypedWord(event.target.value);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Enter") return;
-
-    if (mode === "words") {
-      handleWordInput();
-    } else {
-      handleSentenceInput();
+    if (event.key === "Enter") {
+      submitAnswer(typedWord);
     }
-
-    setTypedWord("");
   };
 
-  const startPractice = () => {
+  const handleStartPractice = () => {
     const words = inputText.trim().split("/").filter(Boolean);
-    if (words.length === 0) return;
-
-    setShuffledWords([...words].sort(() => Math.random() - 0.5));
-    setSentences(generateSentences(words).sort(() => Math.random() - 0.5));
-    setCurrentWordIndex(0);
-    setCurrentSentenceIndex(0);
-    setTypedWord("");
-    setCorrectCount(0);
-    setIncorrectCount(0);
-    setIncorrectWords([]);
+    if (words.length > 0) {
+      startPractice(words);
+    }
   };
 
   useEffect(() => {
@@ -136,7 +68,7 @@ export default function TypingPractice() {
               className={`px-4 py-2 rounded ${
                 mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
               }`}
-              onClick={() => setMode("words")}
+              onClick={() => switchMode("words")}
             >
               단어 연습
             </button>
@@ -144,7 +76,7 @@ export default function TypingPractice() {
               className={`px-4 py-2 rounded ${
                 mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
               }`}
-              onClick={() => setMode("sentences")}
+              onClick={() => switchMode("sentences")}
             >
               문장 연습
             </button>
@@ -160,7 +92,7 @@ export default function TypingPractice() {
 
           <button
             className="px-4 py-2 bg-blue-500 text-white rounded"
-            onClick={startPractice}
+            onClick={handleStartPractice}
           >
             연습 시작
           </button>
@@ -177,7 +109,7 @@ export default function TypingPractice() {
                       ? "bg-blue-500 text-white border-blue-500"
                       : "bg-gray-200 text-gray-700"
                   }`}
-                  onClick={() => setSpeechRate(rate)}
+                  onClick={() => changeSpeechRate(rate)}
                 >
                   {rate}배
                 </button>
