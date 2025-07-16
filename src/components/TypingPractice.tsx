@@ -78,9 +78,7 @@ export default function TypingPractice() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6 text-center">
-        타자 연습 프로그램
-      </h1>
+      <h1 className="text-2xl font-bold mb-6 text-center">StenoAgile</h1>
 
       <div className="flex flex-col lg:flex-row gap-24">
         <div className="flex-1 space-y-4">
