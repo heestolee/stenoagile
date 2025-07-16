@@ -148,6 +148,11 @@ export const useTypingStore = create<TypingState>()(
         correctCount: state.correctCount,
         incorrectCount: state.incorrectCount,
         isPracticing: state.isPracticing,
+        mode: state.mode,
+        shuffledWords: state.shuffledWords,
+        sentences: state.sentences,
+        currentWordIndex: state.currentWordIndex,
+        currentSentenceIndex: state.currentSentenceIndex,
       }),
     }
   )
