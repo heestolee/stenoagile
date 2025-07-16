@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { STORAGE_KEY } from "../constants";
 
-export type Mode = "words" | "sentences";
+export type Mode = "words" | "sentences" | "random";
 
 export interface IncorrectEntry {
   word: string;
@@ -13,8 +13,10 @@ interface TypingState {
   inputText: string;
   shuffledWords: string[];
   sentences: string[];
+  randomLetters: string[];
   currentWordIndex: number;
   currentSentenceIndex: number;
+  currentLetterIndex: number;
   typedWord: string;
   correctCount: number;
   incorrectCount: number;
@@ -56,8 +58,10 @@ export const useTypingStore = create<TypingState>()(
       inputText: "",
       shuffledWords: [],
       sentences: [],
+      randomLetters: [],
       currentWordIndex: 0,
       currentSentenceIndex: 0,
+      currentLetterIndex: 0,
       typedWord: "",
       correctCount: 0,
       incorrectCount: 0,
@@ -74,27 +78,38 @@ export const useTypingStore = create<TypingState>()(
       changeSpeechRate: (rate) => set({ speechRate: rate }),
 
       startPractice: (words) => {
-        set({
+        const uniqueWords = [...new Set(words)];
+        const randomLetters = uniqueWords.flatMap((word) => word.split(""));
+        const shuffledLetters = [...randomLetters].sort(
+          () => Math.random() - 0.5
+        );
+
+        set((state) => ({
           shuffledWords: [...words].sort(() => Math.random() - 0.5),
           sentences: generateSentences(words).sort(() => Math.random() - 0.5),
+          randomLetters: shuffledLetters,
           currentWordIndex: 0,
           currentSentenceIndex: 0,
+          currentLetterIndex: 0,
           typedWord: "",
           correctCount: 0,
           incorrectCount: 0,
           incorrectWords: [],
-          totalCount: words.length,
+          totalCount:
+            state.mode === "random" ? shuffledLetters.length : words.length,
           progressCount: 0,
           isPracticing: true,
-        });
+        }));
       },
 
       stopPractice: () => {
         set({
           shuffledWords: [],
           sentences: [],
+          randomLetters: [],
           currentWordIndex: 0,
           currentSentenceIndex: 0,
+          currentLetterIndex: 0,
           typedWord: "",
           isPracticing: false,
         });
@@ -105,15 +120,19 @@ export const useTypingStore = create<TypingState>()(
           mode,
           shuffledWords,
           sentences,
+          randomLetters,
           currentWordIndex,
           currentSentenceIndex,
+          currentLetterIndex,
         } = get();
 
         const trimmedInput = removeWhitespace(input);
         const target =
           mode === "words"
             ? removeWhitespace(shuffledWords[currentWordIndex])
-            : removeWhitespace(sentences[currentSentenceIndex]);
+            : mode === "sentences"
+            ? removeWhitespace(sentences[currentSentenceIndex])
+            : randomLetters[currentLetterIndex];
 
         const isCorrect = trimmedInput === target;
 
@@ -123,16 +142,7 @@ export const useTypingStore = create<TypingState>()(
             ? state.incorrectCount + 1
             : state.incorrectCount,
           incorrectWords: !isCorrect
-            ? [
-                ...state.incorrectWords,
-                {
-                  word:
-                    mode === "words"
-                      ? shuffledWords[currentWordIndex]
-                      : sentences[currentSentenceIndex],
-                  typed: input.trim(),
-                },
-              ]
+            ? [...state.incorrectWords, { word: target, typed: input.trim() }]
             : state.incorrectWords,
           currentWordIndex:
             mode === "words"
@@ -142,6 +152,10 @@ export const useTypingStore = create<TypingState>()(
             mode === "sentences"
               ? (currentSentenceIndex + 1) % sentences.length
               : currentSentenceIndex,
+          currentLetterIndex:
+            mode === "random"
+              ? (currentLetterIndex + 1) % randomLetters.length
+              : currentLetterIndex,
           typedWord: "",
           progressCount: state.progressCount + 1,
         }));
@@ -160,8 +174,10 @@ export const useTypingStore = create<TypingState>()(
         mode: state.mode,
         shuffledWords: state.shuffledWords,
         sentences: state.sentences,
+        randomLetters: state.randomLetters,
         currentWordIndex: state.currentWordIndex,
         currentSentenceIndex: state.currentSentenceIndex,
+        currentLetterIndex: state.currentLetterIndex,
       }),
     }
   )

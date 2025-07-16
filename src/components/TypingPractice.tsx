@@ -6,9 +6,11 @@ export default function TypingPractice() {
   const {
     inputText,
     shuffledWords,
+    randomLetters,
     sentences,
     currentWordIndex,
     currentSentenceIndex,
+    currentLetterIndex,
     typedWord,
     correctCount,
     incorrectCount,
@@ -75,8 +77,10 @@ export default function TypingPractice() {
       speakText(shuffledWords[currentWordIndex]);
     } else if (mode === "sentences" && sentences.length > 0) {
       speakText(sentences[currentSentenceIndex]);
+    } else if (mode === "random" && randomLetters.length > 0) {
+      speakText(randomLetters[currentLetterIndex]);
     }
-  }, [currentWordIndex, currentSentenceIndex, mode]);
+  }, [mode, currentWordIndex, currentSentenceIndex, currentLetterIndex]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -112,8 +116,15 @@ export default function TypingPractice() {
             >
               문장 연습
             </button>
+            <button
+              className={`px-4 py-2 rounded ${
+                mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
+              }`}
+              onClick={() => switchMode("random")}
+            >
+              랜덤 연습
+            </button>
           </div>
-
           <textarea
             className="w-full p-2 border rounded"
             rows={25}
@@ -155,7 +166,9 @@ export default function TypingPractice() {
           <p className="text-lg font-semibold">
             {mode === "words"
               ? shuffledWords[currentWordIndex]
-              : sentences[currentSentenceIndex]}
+              : mode === "sentences"
+              ? sentences[currentSentenceIndex]
+              : randomLetters[currentLetterIndex] ?? ""}
           </p>
 
           <input
