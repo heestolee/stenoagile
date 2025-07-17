@@ -30,9 +30,14 @@ export default function TypingPractice() {
   } = useTypingStore();
 
   const speakText = (text: string) => {
+    window.speechSynthesis.cancel();
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = speechRate;
-    window.speechSynthesis.speak(utterance);
+
+    requestAnimationFrame(() => {
+      window.speechSynthesis.speak(utterance);
+    });
   };
 
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) =>
