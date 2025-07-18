@@ -23,6 +23,7 @@ export default function TypingPractice() {
     updateTypedWord,
     switchMode,
     changeSpeechRate,
+    removeIncorrectWord,
     isPracticing,
     startPractice,
     stopPractice,
@@ -188,19 +189,30 @@ export default function TypingPractice() {
 
           <p className="text-sm font-medium">
             <span className="text-blue-600">정답: {correctCount}</span> |{" "}
-            <span className="text-red-600">오답: {incorrectCount}</span> | 진행:{" "}
-            {progressCount} / {totalCount}
+            <span className="text-rose-600">오답: {incorrectCount}</span> |
+            진행: {progressCount} / {totalCount}
           </p>
 
           <div>
-            <h2 className="text-xl font-semibold">오답 노트</h2>
-            <ul>
-              {incorrectWords.map((item) => (
-                <li key={`${item.word}-${item.typed}`} className="text-red-500">
-                  {item.word} → {item.typed}
-                </li>
-              ))}
-            </ul>
+            <h2 className="text-xl font-semibold mb-2">오답 노트</h2>
+            <div className="h-[500px] overflow-y-scroll border rounded p-2">
+              <ul className="space-y-1 text-sm">
+                {incorrectWords.map((item) => (
+                  <li
+                    key={`${item.word}-${item.typed}`}
+                    className="text-rose-600 flex items-center gap-2"
+                  >
+                    <button
+                      className="bg-stone-500 text-white rounded px-2 py-0.5 text-sm"
+                      onClick={() => removeIncorrectWord(item.word, item.typed)}
+                    >
+                      &times;
+                    </button>
+                    {item.word} → {item.typed}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
       </div>

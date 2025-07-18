@@ -31,6 +31,7 @@ interface TypingState {
   updateTypedWord: (text: string) => void;
   switchMode: (mode: Mode) => void;
   changeSpeechRate: (rate: number) => void;
+  removeIncorrectWord: (word: string, typed: string) => void;
 
   startPractice: (words: string[]) => void;
   stopPractice: () => void;
@@ -114,6 +115,17 @@ export const useTypingStore = create<TypingState>()(
           isPracticing: false,
         });
       },
+
+      removeIncorrectWord: (word: string, typed: string) =>
+        set((state) => {
+          const filtered = state.incorrectWords.filter(
+            (item) => !(item.word === word && item.typed === typed)
+          );
+          return {
+            incorrectWords: filtered,
+            incorrectCount: filtered.length,
+          };
+        }),
 
       submitAnswer: (input) => {
         const {
