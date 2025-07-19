@@ -79,9 +79,9 @@ export const useTypingStore = create<TypingState>()(
       changeSpeechRate: (rate) => set({ speechRate: rate }),
 
       startPractice: (words) => {
-        const uniqueWords = [...new Set(words)];
-        const randomLetters = uniqueWords.flatMap((word) => word.split(""));
-        const shuffledLetters = [...randomLetters].sort(
+        const allLetters = words.flatMap((word) => word.trim().split(""));
+        const uniqueLetters = [...new Set(allLetters)];
+        const shuffledLetters = [...uniqueLetters].sort(
           () => Math.random() - 0.5
         );
 
