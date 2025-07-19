@@ -1,6 +1,6 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect } from "react";
 import { useTypingStore } from "../store/useTypingStore";
-import { savedText1, savedText2 } from "../constants";
+import { savedText1, savedText2, savedText5 } from "../constants";
 
 export default function TypingPractice() {
   const {
@@ -75,6 +75,8 @@ export default function TypingPractice() {
       case 3:
       case 4:
       case 5:
+        updateInputText(savedText5);
+        break;
       default:
         break;
     }
