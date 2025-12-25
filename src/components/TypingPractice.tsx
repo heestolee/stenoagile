@@ -154,7 +154,7 @@ export default function TypingPractice() {
     } else if (mode === "random" && randomLetters.length > 0) {
       speakText(randomLetters[currentLetterIndex]);
     }
-  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex]);
+  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
