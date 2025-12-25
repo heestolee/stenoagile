@@ -93,7 +93,7 @@ export default function TypingPractice() {
     const cps = parseFloat(inputValue);
     if (isNaN(cps)) return;
 
-    const clampedCps = clampCps(cps, 0, 5);
+    const clampedCps = clampCps(cps, 0, 10);
     changeSpeechRate(cpsToRate(clampedCps));
   };
 
@@ -209,7 +209,7 @@ export default function TypingPractice() {
                 <input
                   type="number"
                   min={0}
-                  max={5}
+                  max={10}
                   step={0.1}
                   value={rateToCps(speechRate).toFixed(1)}
                   onChange={handleCpsChange}
@@ -226,7 +226,7 @@ export default function TypingPractice() {
             <input
               type="range"
               min={0}
-              max={5}
+              max={10}
               step={0.1}
               value={rateToCps(speechRate)}
               onChange={(e) => {
