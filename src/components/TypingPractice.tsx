@@ -32,6 +32,7 @@ export default function TypingPractice() {
   } = useTypingStore();
 
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
+  const [showText, setShowText] = useState(true);
 
   // Microsoft Heami 음성 로드
   useEffect(() => {
@@ -253,13 +254,29 @@ export default function TypingPractice() {
             />
           </div>
 
-          <p className="text-lg font-semibold">
-            {mode === "words"
-              ? shuffledWords[currentWordIndex]
-              : mode === "sentences"
-              ? sentences[currentSentenceIndex]
-              : randomLetters[currentLetterIndex] ?? ""}
-          </p>
+          <div className="flex items-center space-x-4">
+            <label className="font-medium whitespace-nowrap">글자 표시:</label>
+            <button
+              className={`px-4 py-2 rounded font-medium transition ${
+                showText
+                  ? "bg-blue-500 text-white hover:bg-blue-600"
+                  : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+              }`}
+              onClick={() => setShowText(!showText)}
+            >
+              {showText ? "ON" : "OFF"}
+            </button>
+          </div>
+
+          {showText && (
+            <p className="text-lg font-semibold">
+              {mode === "words"
+                ? shuffledWords[currentWordIndex]
+                : mode === "sentences"
+                ? sentences[currentSentenceIndex]
+                : randomLetters[currentLetterIndex] ?? ""}
+            </p>
+          )}
 
           <input
             type="text"
