@@ -29,11 +29,16 @@ export default function TypingPractice() {
     startPractice,
     stopPractice,
     submitAnswer,
+    sessionStartTime,
+    totalKeystrokes,
+    totalCharacters,
+    incrementKeystrokes,
   } = useTypingStore();
 
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [showText, setShowText] = useState(true);
-  const timeoutIds = useRef<NodeJS.Timeout[]>([]);
+  const timeoutIds = useRef<number[]>([]);
+  const [currentStats, setCurrentStats] = useState({ kpm: 0, cpm: 0 });
 
   // Microsoft Heami 음성 로드
   useEffect(() => {
@@ -83,6 +88,26 @@ export default function TypingPractice() {
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       submitAnswer(typedWord);
+      return;
+    }
+
+    // 실제 문자 입력 키만 카운트
+    // 수정자 키(Ctrl, Alt, Meta), 방향키, 기능키 등은 제외
+    const excludedKeys = [
+      'Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Tab', 'Escape',
+      'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+      'Home', 'End', 'PageUp', 'PageDown', 'Insert',
+      'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
+    ];
+
+    // Ctrl, Alt, Meta와 함께 누른 조합키는 제외 (Ctrl+C, Ctrl+V 등)
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+      return;
+    }
+
+    // 제외된 키가 아니면 타수 증가 (Backspace, Delete, Space 포함)
+    if (!excludedKeys.includes(event.key)) {
+      incrementKeystrokes();
     }
   };
 
@@ -139,6 +164,29 @@ export default function TypingPractice() {
       speakText(randomLetters[currentLetterIndex]);
     }
   }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate]);
+
+  // 실시간 타수/자수 계산
+  useEffect(() => {
+    if (!isPracticing || !sessionStartTime) {
+      setCurrentStats({ kpm: 0, cpm: 0 });
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const elapsedMs = Date.now() - sessionStartTime;
+      const elapsedMinutes = elapsedMs / 1000 / 60;
+
+      if (elapsedMinutes > 0) {
+        // KPM (Keystrokes Per Minute): 분당 타수
+        const kpm = Math.round(totalKeystrokes / elapsedMinutes);
+        // CPM (Characters Per Minute): 분당 자수
+        const cpm = Math.round(totalCharacters / elapsedMinutes);
+        setCurrentStats({ kpm, cpm });
+      }
+    }, 1000); // 1초마다 업데이트
+
+    return () => clearInterval(interval);
+  }, [isPracticing, sessionStartTime, totalKeystrokes, totalCharacters]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -237,18 +285,27 @@ export default function TypingPractice() {
             />
           </div>
 
-          <div className="flex items-center space-x-4">
-            <label className="font-medium whitespace-nowrap">글자 표시:</label>
-            <button
-              className={`px-4 py-2 rounded font-medium transition ${
-                showText
-                  ? "bg-blue-500 text-white hover:bg-blue-600"
-                  : "bg-gray-300 text-gray-700 hover:bg-gray-400"
-              }`}
-              onClick={() => setShowText(!showText)}
-            >
-              {showText ? "ON" : "OFF"}
-            </button>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <label className="font-medium whitespace-nowrap">글자 표시:</label>
+              <button
+                className={`px-4 py-2 rounded font-medium transition ${
+                  showText
+                    ? "bg-blue-500 text-white hover:bg-blue-600"
+                    : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                }`}
+                onClick={() => setShowText(!showText)}
+              >
+                {showText ? "ON" : "OFF"}
+              </button>
+            </div>
+
+            {isPracticing && (
+              <div className="flex items-center space-x-4 text-sm font-medium">
+                <span className="text-green-600">타수: {currentStats.kpm}/분</span>
+                <span className="text-purple-600">자수: {currentStats.cpm}/분</span>
+              </div>
+            )}
           </div>
 
           {showText && (
