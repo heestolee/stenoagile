@@ -1,7 +1,7 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect, useState } from "react";
 import { useTypingStore } from "../store/useTypingStore";
-import { savedText1, savedText2, savedText5 } from "../constants";
 import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
+import { savedText1, savedText2, savedText5 } from "../constants";
 
 export default function TypingPractice() {
   const {
