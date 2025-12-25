@@ -28,17 +28,18 @@ interface TypingState {
   speechRate: number;
   isPracticing: boolean;
 
-  // 타수/자수 추적
-  sessionStartTime: number | null;
-  totalKeystrokes: number;
-  totalCharacters: number;
+  // 타수/자수 추적 (현재 단어 기준)
+  currentWordStartTime: number | null;
+  currentWordKeystrokes: number;
 
   updateInputText: (text: string) => void;
   updateTypedWord: (text: string) => void;
   switchMode: (mode: Mode) => void;
   changeSpeechRate: (rate: number) => void;
   removeIncorrectWord: (word: string, typed: string) => void;
-  incrementKeystrokes: () => void;
+  startCurrentWordTracking: () => void;
+  incrementCurrentWordKeystrokes: () => void;
+  resetCurrentWordTracking: () => void;
 
   startPractice: (words: string[]) => void;
   stopPractice: () => void;
@@ -81,17 +82,23 @@ export const useTypingStore = create<TypingState>()(
       isPracticing: false,
 
       // 타수/자수 초기값
-      sessionStartTime: null,
-      totalKeystrokes: 0,
-      totalCharacters: 0,
+      currentWordStartTime: null,
+      currentWordKeystrokes: 0,
 
       updateInputText: (text) => set({ inputText: text }),
       updateTypedWord: (text) => set({ typedWord: text }),
       switchMode: (mode) => set({ mode }),
       changeSpeechRate: (rate) => set({ speechRate: rate }),
-      incrementKeystrokes: () => set((state) => ({
-        totalKeystrokes: state.totalKeystrokes + 1
+      startCurrentWordTracking: () => set({
+        currentWordStartTime: Date.now()
+      }),
+      incrementCurrentWordKeystrokes: () => set((state) => ({
+        currentWordKeystrokes: state.currentWordKeystrokes + 1
       })),
+      resetCurrentWordTracking: () => set({
+        currentWordStartTime: null,
+        currentWordKeystrokes: 0
+      }),
 
       startPractice: (words) => {
         const allLetters = words.flatMap((word) => word.trim().split(""));
@@ -115,9 +122,8 @@ export const useTypingStore = create<TypingState>()(
             state.mode === "random" ? shuffledLetters.length : words.length,
           progressCount: 0,
           isPracticing: true,
-          sessionStartTime: Date.now(),
-          totalKeystrokes: 0,
-          totalCharacters: 0,
+          currentWordStartTime: null,
+          currentWordKeystrokes: 0,
         }));
       },
 
@@ -136,9 +142,8 @@ export const useTypingStore = create<TypingState>()(
           totalCount: 0,
           progressCount: 0,
           isPracticing: false,
-          sessionStartTime: null,
-          totalKeystrokes: 0,
-          totalCharacters: 0,
+          currentWordStartTime: null,
+          currentWordKeystrokes: 0,
         });
       },
 
@@ -174,9 +179,6 @@ export const useTypingStore = create<TypingState>()(
 
         const isCorrect = trimmedInput === target;
 
-        // 완성된 글자 수 카운트 (공백 제외)
-        const charCount = input.trim().replace(/\s+/g, '').length;
-
         set((state) => ({
           correctCount: isCorrect ? state.correctCount + 1 : state.correctCount,
           incorrectCount: !isCorrect
@@ -199,7 +201,6 @@ export const useTypingStore = create<TypingState>()(
               : currentLetterIndex,
           typedWord: "",
           progressCount: state.progressCount + 1,
-          totalCharacters: state.totalCharacters + charCount,
         }));
       },
     }),

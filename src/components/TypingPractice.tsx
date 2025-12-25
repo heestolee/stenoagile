@@ -29,10 +29,11 @@ export default function TypingPractice() {
     startPractice,
     stopPractice,
     submitAnswer,
-    sessionStartTime,
-    totalKeystrokes,
-    totalCharacters,
-    incrementKeystrokes,
+    currentWordStartTime,
+    currentWordKeystrokes,
+    startCurrentWordTracking,
+    incrementCurrentWordKeystrokes,
+    resetCurrentWordTracking,
   } = useTypingStore();
 
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
@@ -88,6 +89,7 @@ export default function TypingPractice() {
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       submitAnswer(typedWord);
+      resetCurrentWordTracking();
       return;
     }
 
@@ -107,7 +109,11 @@ export default function TypingPractice() {
 
     // 제외된 키가 아니면 타수 증가 (Backspace, Delete, Space 포함)
     if (!excludedKeys.includes(event.key)) {
-      incrementKeystrokes();
+      // 첫 번째 키 입력 시 타이머 시작
+      if (!currentWordStartTime) {
+        startCurrentWordTracking();
+      }
+      incrementCurrentWordKeystrokes();
     }
   };
 
@@ -165,28 +171,25 @@ export default function TypingPractice() {
     }
   }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate]);
 
-  // 실시간 타수/자수 계산
+  // 현재 단어 타이핑 중 타수/자수 계산
   useEffect(() => {
-    if (!isPracticing || !sessionStartTime) {
+    if (!isPracticing || !currentWordStartTime || currentWordKeystrokes === 0) {
       setCurrentStats({ kpm: 0, cpm: 0 });
       return;
     }
 
-    const interval = setInterval(() => {
-      const elapsedMs = Date.now() - sessionStartTime;
-      const elapsedMinutes = elapsedMs / 1000 / 60;
+    const elapsedMs = Date.now() - currentWordStartTime;
+    const elapsedMinutes = elapsedMs / 1000 / 60;
 
-      if (elapsedMinutes > 0) {
-        // KPM (Keystrokes Per Minute): 분당 타수
-        const kpm = Math.round(totalKeystrokes / elapsedMinutes);
-        // CPM (Characters Per Minute): 분당 자수
-        const cpm = Math.round(totalCharacters / elapsedMinutes);
-        setCurrentStats({ kpm, cpm });
-      }
-    }, 1000); // 1초마다 업데이트
-
-    return () => clearInterval(interval);
-  }, [isPracticing, sessionStartTime, totalKeystrokes, totalCharacters]);
+    if (elapsedMinutes > 0) {
+      // KPM (Keystrokes Per Minute): 분당 타수
+      const kpm = Math.round(currentWordKeystrokes / elapsedMinutes);
+      // CPM (Characters Per Minute): 분당 자수 (공백 제외한 현재 입력 길이)
+      const charCount = typedWord.trim().replace(/\s+/g, '').length;
+      const cpm = Math.round(charCount / elapsedMinutes);
+      setCurrentStats({ kpm, cpm });
+    }
+  }, [isPracticing, currentWordStartTime, currentWordKeystrokes, typedWord]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
