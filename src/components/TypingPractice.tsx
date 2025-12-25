@@ -39,7 +39,7 @@ export default function TypingPractice() {
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [showText, setShowText] = useState(true);
   const timeoutIds = useRef<number[]>([]);
-  const [currentStats, setCurrentStats] = useState({ kpm: 0, cpm: 0 });
+  const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0 });
 
   // Microsoft Heami 음성 로드
   useEffect(() => {
@@ -88,8 +88,21 @@ export default function TypingPractice() {
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
+      // 엔터를 칠 때 최종 결과 계산
+      if (currentWordStartTime && currentWordKeystrokes > 0) {
+        const elapsedMs = Date.now() - currentWordStartTime;
+        const elapsedMinutes = elapsedMs / 1000 / 60;
+
+        if (elapsedMinutes > 0) {
+          const kpm = Math.round(currentWordKeystrokes / elapsedMinutes);
+          const charCount = typedWord.trim().replace(/\s+/g, '').length;
+          const cpm = Math.round(charCount / elapsedMinutes);
+          setLastResult({ kpm, cpm });
+        }
+      }
+
       submitAnswer(typedWord);
-      resetCurrentWordTracking();
+      resetCurrentWordTracking(); // 다음 단어를 위해 리셋
       return;
     }
 
@@ -171,25 +184,12 @@ export default function TypingPractice() {
     }
   }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate]);
 
-  // 현재 단어 타이핑 중 타수/자수 계산
+  // 연습 종료 시 결과 초기화
   useEffect(() => {
-    if (!isPracticing || !currentWordStartTime || currentWordKeystrokes === 0) {
-      setCurrentStats({ kpm: 0, cpm: 0 });
-      return;
+    if (!isPracticing) {
+      setLastResult({ kpm: 0, cpm: 0 });
     }
-
-    const elapsedMs = Date.now() - currentWordStartTime;
-    const elapsedMinutes = elapsedMs / 1000 / 60;
-
-    if (elapsedMinutes > 0) {
-      // KPM (Keystrokes Per Minute): 분당 타수
-      const kpm = Math.round(currentWordKeystrokes / elapsedMinutes);
-      // CPM (Characters Per Minute): 분당 자수 (공백 제외한 현재 입력 길이)
-      const charCount = typedWord.trim().replace(/\s+/g, '').length;
-      const cpm = Math.round(charCount / elapsedMinutes);
-      setCurrentStats({ kpm, cpm });
-    }
-  }, [isPracticing, currentWordStartTime, currentWordKeystrokes, typedWord]);
+  }, [isPracticing]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -305,8 +305,8 @@ export default function TypingPractice() {
 
             {isPracticing && (
               <div className="flex items-center space-x-4 text-sm font-medium">
-                <span className="text-green-600">타수: {currentStats.kpm}/분</span>
-                <span className="text-purple-600">자수: {currentStats.cpm}/분</span>
+                <span className="text-green-600">타수: {lastResult.kpm}/분</span>
+                <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
               </div>
             )}
           </div>
