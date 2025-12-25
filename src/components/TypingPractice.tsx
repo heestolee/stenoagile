@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, useEffect, useState } from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTypingStore } from "../store/useTypingStore";
 import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
 import { savedText1, savedText2, savedText5 } from "../constants";
@@ -33,6 +33,7 @@ export default function TypingPractice() {
 
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [showText, setShowText] = useState(true);
+  const timeoutIds = useRef<NodeJS.Timeout[]>([]);
 
   // Microsoft Heami 음성 로드
   useEffect(() => {
@@ -50,46 +51,27 @@ export default function TypingPractice() {
     window.speechSynthesis.onvoiceschanged = loadHeami;
   }, []);
 
+  const clearAllTimeouts = () => {
+    timeoutIds.current.forEach(clearTimeout);
+    timeoutIds.current = [];
+  };
+
   const speakText = (text: string) => {
     window.speechSynthesis.cancel();
+    clearAllTimeouts();
 
-    // 문장인 경우 단어별로 쪼개서 pause와 함께 재생
-    const words = text.split(/\s+/).filter(Boolean);
-
-    if (words.length > 1) {
-      // 여러 단어인 경우: 각 단어를 개별 재생하고 사이에 pause
-      let delay = 0;
-      words.forEach((word) => {
-        setTimeout(() => {
-          const utterance = new SpeechSynthesisUtterance(word);
-          utterance.rate = speechRate;
-          utterance.pitch = 1.2; // 음높이를 높여 더 명확하게 (1.1 → 1.2)
-          utterance.volume = 1.0; // 볼륨 최대
-          if (heamiVoice) {
-            utterance.voice = heamiVoice;
-          }
-
-          window.speechSynthesis.speak(utterance);
-        }, delay);
-
-        // 각 단어의 예상 재생 시간 + pause (500ms로 증가)
-        const wordDuration = (word.length / rateToCps(speechRate)) * 1000;
-        delay += wordDuration + 500; // 300ms → 500ms로 증가
-      });
-    } else {
-      // 단일 단어나 글자인 경우: 그냥 재생
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = speechRate;
-      utterance.pitch = 1.2; // 1.1 → 1.2
-      utterance.volume = 1.0;
-      if (heamiVoice) {
-        utterance.voice = heamiVoice;
-      }
-
-      requestAnimationFrame(() => {
-        window.speechSynthesis.speak(utterance);
-      });
+    // 텍스트를 통째로 재생 (Web Speech API가 자연스럽게 처리)
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = speechRate;
+    utterance.pitch = 1.2;
+    utterance.volume = 1.0;
+    if (heamiVoice) {
+      utterance.voice = heamiVoice;
     }
+
+    requestAnimationFrame(() => {
+      window.speechSynthesis.speak(utterance);
+    });
   };
 
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) =>
@@ -118,6 +100,7 @@ export default function TypingPractice() {
   const handleStartOrStopPractice = () => {
     if (isPracticing) {
       window.speechSynthesis.cancel();
+      clearAllTimeouts();
       stopPractice();
     } else {
       const words = inputText.trim().split("/").filter(Boolean);
