@@ -1,6 +1,7 @@
-import { type ChangeEvent, type KeyboardEvent, useEffect } from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useState } from "react";
 import { useTypingStore } from "../store/useTypingStore";
 import { savedText1, savedText2, savedText5 } from "../constants";
+import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
 
 export default function TypingPractice() {
   const {
@@ -30,15 +31,64 @@ export default function TypingPractice() {
     submitAnswer,
   } = useTypingStore();
 
+  const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
+
+  // Microsoft Heami 음성 로드
+  useEffect(() => {
+    const loadHeami = () => {
+      const availableVoices = window.speechSynthesis.getVoices();
+      const heami = availableVoices.find(voice =>
+        voice.name.includes('Heami')
+      );
+      if (heami) {
+        setHeamiVoice(heami);
+      }
+    };
+
+    loadHeami();
+    window.speechSynthesis.onvoiceschanged = loadHeami;
+  }, []);
+
   const speakText = (text: string) => {
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = speechRate;
+    // 문장인 경우 단어별로 쪼개서 pause와 함께 재생
+    const words = text.split(/\s+/).filter(Boolean);
 
-    requestAnimationFrame(() => {
-      window.speechSynthesis.speak(utterance);
-    });
+    if (words.length > 1) {
+      // 여러 단어인 경우: 각 단어를 개별 재생하고 사이에 pause
+      let delay = 0;
+      words.forEach((word) => {
+        setTimeout(() => {
+          const utterance = new SpeechSynthesisUtterance(word);
+          utterance.rate = speechRate;
+          utterance.pitch = 1.2; // 음높이를 높여 더 명확하게 (1.1 → 1.2)
+          utterance.volume = 1.0; // 볼륨 최대
+          if (heamiVoice) {
+            utterance.voice = heamiVoice;
+          }
+
+          window.speechSynthesis.speak(utterance);
+        }, delay);
+
+        // 각 단어의 예상 재생 시간 + pause (500ms로 증가)
+        const wordDuration = (word.length / rateToCps(speechRate)) * 1000;
+        delay += wordDuration + 500; // 300ms → 500ms로 증가
+      });
+    } else {
+      // 단일 단어나 글자인 경우: 그냥 재생
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = speechRate;
+      utterance.pitch = 1.2; // 1.1 → 1.2
+      utterance.volume = 1.0;
+      if (heamiVoice) {
+        utterance.voice = heamiVoice;
+      }
+
+      requestAnimationFrame(() => {
+        window.speechSynthesis.speak(utterance);
+      });
+    }
   };
 
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) =>
@@ -53,8 +103,20 @@ export default function TypingPractice() {
     }
   };
 
+  const handleCpsChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const inputValue = event.target.value;
+    if (inputValue === "") return;
+
+    const cps = parseFloat(inputValue);
+    if (isNaN(cps)) return;
+
+    const clampedCps = clampCps(cps, 0, 5);
+    changeSpeechRate(cpsToRate(clampedCps));
+  };
+
   const handleStartOrStopPractice = () => {
     if (isPracticing) {
+      window.speechSynthesis.cancel();
       stopPractice();
     } else {
       const words = inputText.trim().split("/").filter(Boolean);
@@ -83,6 +145,8 @@ export default function TypingPractice() {
   };
 
   useEffect(() => {
+    if (!isPracticing) return;
+
     if (mode === "words" && shuffledWords.length > 0) {
       speakText(shuffledWords[currentWordIndex]);
     } else if (mode === "sentences" && sentences.length > 0) {
@@ -90,7 +154,7 @@ export default function TypingPractice() {
     } else if (mode === "random" && randomLetters.length > 0) {
       speakText(randomLetters[currentLetterIndex]);
     }
-  }, [mode, currentWordIndex, currentSentenceIndex, currentLetterIndex]);
+  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -154,23 +218,39 @@ export default function TypingPractice() {
           </button>
         </div>
         <div className="flex-1 space-y-4">
-          <div className="flex items-center space-x-4">
-            <label className="font-medium whitespace-nowrap">읽기 속도:</label>
-            <div className="flex space-x-2">
-              {[0.25, 0.5, 1].map((rate) => (
-                <button
-                  key={rate}
-                  className={`px-3 py-1 rounded border ${
-                    speechRate === rate
-                      ? "bg-blue-500 text-white border-blue-500"
-                      : "bg-gray-200 text-gray-700"
-                  }`}
-                  onClick={() => changeSpeechRate(rate)}
-                >
-                  {rate}배
-                </button>
-              ))}
+          <div className="space-y-2">
+            <div className="flex items-center space-x-4">
+              <label className="font-medium whitespace-nowrap">읽기 속도:</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  step={0.1}
+                  value={rateToCps(speechRate).toFixed(1)}
+                  onChange={handleCpsChange}
+                  onBlur={(e) => {
+                    if (e.target.value === "") {
+                      changeSpeechRate(cpsToRate(3));
+                    }
+                  }}
+                  className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-600">글자/초</span>
+              </div>
             </div>
+            <input
+              type="range"
+              min={0}
+              max={5}
+              step={0.1}
+              value={rateToCps(speechRate)}
+              onChange={(e) => {
+                const cps = parseFloat(e.target.value);
+                changeSpeechRate(cpsToRate(cps));
+              }}
+              className="w-full"
+            />
           </div>
 
           <p className="text-lg font-semibold">

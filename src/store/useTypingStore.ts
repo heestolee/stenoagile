@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { STORAGE_KEY } from "../constants";
+import { cpsToRate } from "../utils/speechUtils";
 
 export type Mode = "words" | "sentences" | "random";
 
@@ -70,7 +71,7 @@ export const useTypingStore = create<TypingState>()(
       totalCount: 0,
       progressCount: 0,
       mode: "words",
-      speechRate: 1,
+      speechRate: cpsToRate(3),
       isPracticing: false,
 
       updateInputText: (text) => set({ inputText: text }),
@@ -112,6 +113,11 @@ export const useTypingStore = create<TypingState>()(
           currentSentenceIndex: 0,
           currentLetterIndex: 0,
           typedWord: "",
+          correctCount: 0,
+          incorrectCount: 0,
+          incorrectWords: [],
+          totalCount: 0,
+          progressCount: 0,
           isPracticing: false,
         });
       },
@@ -177,19 +183,8 @@ export const useTypingStore = create<TypingState>()(
       name: STORAGE_KEY,
       partialize: (state) => ({
         inputText: state.inputText,
-        incorrectWords: state.incorrectWords,
-        correctCount: state.correctCount,
-        incorrectCount: state.incorrectCount,
-        totalCount: state.totalCount,
-        progressCount: state.progressCount,
-        isPracticing: state.isPracticing,
         mode: state.mode,
-        shuffledWords: state.shuffledWords,
-        sentences: state.sentences,
-        randomLetters: state.randomLetters,
-        currentWordIndex: state.currentWordIndex,
-        currentSentenceIndex: state.currentSentenceIndex,
-        currentLetterIndex: state.currentLetterIndex,
+        speechRate: state.speechRate,
       }),
     }
   )
