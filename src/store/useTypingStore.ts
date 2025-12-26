@@ -26,6 +26,7 @@ interface TypingState {
   progressCount: number;
   mode: Mode;
   speechRate: number;
+  isSoundEnabled: boolean;
   isPracticing: boolean;
 
   // 타수/자수 추적 (현재 단어 기준)
@@ -36,6 +37,7 @@ interface TypingState {
   updateTypedWord: (text: string) => void;
   switchMode: (mode: Mode) => void;
   changeSpeechRate: (rate: number) => void;
+  toggleSound: () => void;
   removeIncorrectWord: (word: string, typed: string) => void;
   startCurrentWordTracking: () => void;
   incrementCurrentWordKeystrokes: () => void;
@@ -79,6 +81,7 @@ export const useTypingStore = create<TypingState>()(
       progressCount: 0,
       mode: "words",
       speechRate: cpsToRate(3),
+      isSoundEnabled: true,
       isPracticing: false,
 
       // 타수/자수 초기값
@@ -89,6 +92,7 @@ export const useTypingStore = create<TypingState>()(
       updateTypedWord: (text) => set({ typedWord: text }),
       switchMode: (mode) => set({ mode }),
       changeSpeechRate: (rate) => set({ speechRate: rate }),
+      toggleSound: () => set((state) => ({ isSoundEnabled: !state.isSoundEnabled })),
       startCurrentWordTracking: () => set({
         currentWordStartTime: Date.now()
       }),
@@ -210,6 +214,7 @@ export const useTypingStore = create<TypingState>()(
         inputText: state.inputText,
         mode: state.mode,
         speechRate: state.speechRate,
+        isSoundEnabled: state.isSoundEnabled,
       }),
     }
   )

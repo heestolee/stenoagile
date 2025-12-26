@@ -20,10 +20,12 @@ export default function TypingPractice() {
     totalCount,
     mode,
     speechRate,
+    isSoundEnabled,
     updateInputText,
     updateTypedWord,
     switchMode,
     changeSpeechRate,
+    toggleSound,
     removeIncorrectWord,
     isPracticing,
     startPractice,
@@ -65,6 +67,9 @@ export default function TypingPractice() {
   const speakText = (text: string) => {
     window.speechSynthesis.cancel();
     clearAllTimeouts();
+
+    // 소리가 꺼져있으면 재생하지 않음
+    if (!isSoundEnabled) return;
 
     // 텍스트를 통째로 재생 (Web Speech API가 자연스럽게 처리)
     const utterance = new SpeechSynthesisUtterance(text);
@@ -254,24 +259,39 @@ export default function TypingPractice() {
         </div>
         <div className="flex-1 space-y-4">
           <div className="space-y-2">
-            <div className="flex items-center space-x-4">
-              <label className="font-medium whitespace-nowrap">읽기 속도:</label>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  step={0.1}
-                  value={rateToCps(speechRate).toFixed(1)}
-                  onChange={handleCpsChange}
-                  onBlur={(e) => {
-                    if (e.target.value === "") {
-                      changeSpeechRate(cpsToRate(3));
-                    }
-                  }}
-                  className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-600">글자/초</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <label className="font-medium whitespace-nowrap">읽기 속도:</label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    step={0.1}
+                    value={rateToCps(speechRate).toFixed(1)}
+                    onChange={handleCpsChange}
+                    onBlur={(e) => {
+                      if (e.target.value === "") {
+                        changeSpeechRate(cpsToRate(3));
+                      }
+                    }}
+                    className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-600">글자/초</span>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <label className="font-medium whitespace-nowrap">소리:</label>
+                <button
+                  className={`px-4 py-2 rounded font-medium transition ${
+                    isSoundEnabled
+                      ? "bg-blue-500 text-white hover:bg-blue-600"
+                      : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                  }`}
+                  onClick={toggleSound}
+                >
+                  {isSoundEnabled ? "ON" : "OFF"}
+                </button>
               </div>
             </div>
             <input
