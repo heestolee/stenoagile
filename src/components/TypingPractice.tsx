@@ -42,6 +42,7 @@ export default function TypingPractice() {
   const [showText, setShowText] = useState(true);
   const timeoutIds = useRef<number[]>([]);
   const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0 });
+  const [allResults, setAllResults] = useState<{ kpm: number, cpm: number }[]>([]);
 
   // Microsoft Heami 음성 로드
   useEffect(() => {
@@ -103,6 +104,7 @@ export default function TypingPractice() {
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
           const cpm = Math.round(charCount / elapsedMinutes);
           setLastResult({ kpm, cpm });
+          setAllResults(prev => [...prev, { kpm, cpm }]);
         }
       }
 
@@ -193,8 +195,20 @@ export default function TypingPractice() {
   useEffect(() => {
     if (!isPracticing) {
       setLastResult({ kpm: 0, cpm: 0 });
+      setAllResults([]);
     }
   }, [isPracticing]);
+
+  // 평균 계산
+  const calculateAverage = () => {
+    if (allResults.length === 0) return { avgKpm: 0, avgCpm: 0 };
+    const totalKpm = allResults.reduce((sum, result) => sum + result.kpm, 0);
+    const totalCpm = allResults.reduce((sum, result) => sum + result.cpm, 0);
+    return {
+      avgKpm: Math.round(totalKpm / allResults.length),
+      avgCpm: Math.round(totalCpm / allResults.length)
+    };
+  };
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -324,9 +338,17 @@ export default function TypingPractice() {
             </div>
 
             {isPracticing && (
-              <div className="flex items-center space-x-4 text-sm font-medium">
-                <span className="text-green-600">타수: {lastResult.kpm}/분</span>
-                <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
+              <div className="flex flex-col items-end space-y-1">
+                <div className="flex items-center space-x-4 text-sm font-medium">
+                  <span className="text-green-600">타수: {lastResult.kpm}/분</span>
+                  <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
+                </div>
+                {allResults.length > 0 && (
+                  <div className="flex items-center space-x-4 text-xs text-gray-600">
+                    <span>평균 타수: {calculateAverage().avgKpm}/분</span>
+                    <span>평균 자수: {calculateAverage().avgCpm}/분</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
