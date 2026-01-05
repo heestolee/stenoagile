@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import { STORAGE_KEY } from "../constants";
 import { cpsToRate } from "../utils/speechUtils";
 
-export type Mode = "words" | "sentences" | "random";
+export type Mode = "words" | "sentences" | "random" | "sequential";
 
 export interface IncorrectEntry {
   word: string;
@@ -33,6 +33,13 @@ interface TypingState {
   currentWordStartTime: number | null;
   currentWordKeystrokes: number;
 
+  // 순차 표시 모드 (보교치기)
+  sequentialText: string;
+  displayedCharIndices: Set<number>; // 이미 표시된 글자의 인덱스들
+  sequentialSpeed: number; // ms per character
+  randomizedIndices: number[]; // 랜덤 순서로 표시할 글자 인덱스
+  currentDisplayIndex: number; // 현재까지 표시한 글자 개수
+
   updateInputText: (text: string) => void;
   updateTypedWord: (text: string) => void;
   switchMode: (mode: Mode) => void;
@@ -42,6 +49,12 @@ interface TypingState {
   startCurrentWordTracking: () => void;
   incrementCurrentWordKeystrokes: () => void;
   resetCurrentWordTracking: () => void;
+
+  // 순차 표시 액션
+  addDisplayedCharIndex: (index: number) => void;
+  updateSequentialSpeed: (speed: number) => void;
+  resetSequential: () => void;
+  incrementDisplayIndex: () => void;
 
   startPractice: (words: string[]) => void;
   stopPractice: () => void;
@@ -88,6 +101,13 @@ export const useTypingStore = create<TypingState>()(
       currentWordStartTime: null,
       currentWordKeystrokes: 0,
 
+      // 순차 표시 초기값 (보교치기)
+      sequentialText: "",
+      displayedCharIndices: new Set<number>(),
+      sequentialSpeed: 500, // 500ms per character (기본값)
+      randomizedIndices: [],
+      currentDisplayIndex: 0,
+
       updateInputText: (text) => set({ inputText: text }),
       updateTypedWord: (text) => set({ typedWord: text }),
       switchMode: (mode) => set({ mode }),
@@ -104,31 +124,73 @@ export const useTypingStore = create<TypingState>()(
         currentWordKeystrokes: 0
       }),
 
-      startPractice: (words) => {
-        const allLetters = words.flatMap((word) => word.trim().split(""));
-        const uniqueLetters = [...new Set(allLetters)];
-        const shuffledLetters = [...uniqueLetters].sort(
-          () => Math.random() - 0.5
-        );
+      // 순차 표시 액션 구현
+      addDisplayedCharIndex: (index) => set((state) => {
+        const newSet = new Set(state.displayedCharIndices);
+        newSet.add(index);
+        return { displayedCharIndices: newSet };
+      }),
+      updateSequentialSpeed: (speed) => set({ sequentialSpeed: speed }),
+      resetSequential: () => set({
+        sequentialText: "",
+        displayedCharIndices: new Set<number>(),
+        randomizedIndices: [],
+        currentDisplayIndex: 0,
+      }),
+      incrementDisplayIndex: () => set((state) => ({
+        currentDisplayIndex: state.currentDisplayIndex + 1
+      })),
 
-        set((state) => ({
-          shuffledWords: [...words].sort(() => Math.random() - 0.5),
-          sentences: generateSentences(words).sort(() => Math.random() - 0.5),
-          randomLetters: shuffledLetters,
-          currentWordIndex: 0,
-          currentSentenceIndex: 0,
-          currentLetterIndex: 0,
-          typedWord: "",
-          correctCount: 0,
-          incorrectCount: 0,
-          incorrectWords: [],
-          totalCount:
-            state.mode === "random" ? shuffledLetters.length : words.length,
-          progressCount: 0,
-          isPracticing: true,
-          currentWordStartTime: null,
-          currentWordKeystrokes: 0,
-        }));
+      startPractice: (words) => {
+        const state = get();
+
+        if (state.mode === "sequential") {
+          // 보교치기 모드: 글자 인덱스를 랜덤하게 섞음 (띄어쓰기 제거)
+          const text = state.inputText.replace(/\s+/g, '');
+          const indices = Array.from({ length: text.length }, (_, i) => i);
+          const shuffledIndices = [...indices].sort(() => Math.random() - 0.5);
+
+          set({
+            sequentialText: text,
+            displayedCharIndices: new Set<number>(),
+            randomizedIndices: shuffledIndices,
+            currentDisplayIndex: 0,
+            isPracticing: true,
+            correctCount: 0,
+            incorrectCount: 0,
+            incorrectWords: [],
+            totalCount: 0,
+            progressCount: 0,
+            currentWordStartTime: null,
+            currentWordKeystrokes: 0,
+          });
+        } else {
+          // 기존 모드들
+          const allLetters = words.flatMap((word) => word.trim().split(""));
+          const uniqueLetters = [...new Set(allLetters)];
+          const shuffledLetters = [...uniqueLetters].sort(
+            () => Math.random() - 0.5
+          );
+
+          set({
+            shuffledWords: [...words].sort(() => Math.random() - 0.5),
+            sentences: generateSentences(words).sort(() => Math.random() - 0.5),
+            randomLetters: shuffledLetters,
+            currentWordIndex: 0,
+            currentSentenceIndex: 0,
+            currentLetterIndex: 0,
+            typedWord: "",
+            correctCount: 0,
+            incorrectCount: 0,
+            incorrectWords: [],
+            totalCount:
+              state.mode === "random" ? shuffledLetters.length : words.length,
+            progressCount: 0,
+            isPracticing: true,
+            currentWordStartTime: null,
+            currentWordKeystrokes: 0,
+          });
+        }
       },
 
       stopPractice: () => {
@@ -148,6 +210,10 @@ export const useTypingStore = create<TypingState>()(
           isPracticing: false,
           currentWordStartTime: null,
           currentWordKeystrokes: 0,
+          sequentialText: "",
+          displayedCharIndices: new Set<number>(),
+          randomizedIndices: [],
+          currentDisplayIndex: 0,
         });
       },
 
@@ -215,6 +281,7 @@ export const useTypingStore = create<TypingState>()(
         mode: state.mode,
         speechRate: state.speechRate,
         isSoundEnabled: state.isSoundEnabled,
+        sequentialSpeed: state.sequentialSpeed,
       }),
     }
   )

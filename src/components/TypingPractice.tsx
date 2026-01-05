@@ -36,6 +36,14 @@ export default function TypingPractice() {
     startCurrentWordTracking,
     incrementCurrentWordKeystrokes,
     resetCurrentWordTracking,
+    sequentialText,
+    displayedCharIndices,
+    sequentialSpeed,
+    randomizedIndices,
+    currentDisplayIndex,
+    addDisplayedCharIndex,
+    updateSequentialSpeed,
+    incrementDisplayIndex,
   } = useTypingStore();
 
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
@@ -43,6 +51,24 @@ export default function TypingPractice() {
   const timeoutIds = useRef<number[]>([]);
   const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0 });
   const [allResults, setAllResults] = useState<{ kpm: number, cpm: number }[]>([]);
+  const sequentialTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
+  const [slotNames, setSlotNames] = useState<{ [key: number]: string }>({});
+  const [fontSize, setFontSize] = useState(18); // 기본 글자 크기 18px
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [charsPerRead, setCharsPerRead] = useState(10); // 몇 글자씩 읽을지
+
+  // 슬롯 이름 불러오기
+  useEffect(() => {
+    const savedNames: { [key: number]: string } = {};
+    for (let i = 1; i <= 20; i++) {
+      const name = localStorage.getItem(`slot_${i}_name`);
+      if (name) {
+        savedNames[i] = name;
+      }
+    }
+    setSlotNames(savedNames);
+  }, []);
 
   // Microsoft Heami 음성 로드
   useEffect(() => {
@@ -65,25 +91,34 @@ export default function TypingPractice() {
     timeoutIds.current = [];
   };
 
-  const speakText = (text: string) => {
-    window.speechSynthesis.cancel();
-    clearAllTimeouts();
-
+  const speakText = (text: string, isSequential = false) => {
     // 소리가 꺼져있으면 재생하지 않음
     if (!isSoundEnabled) return;
 
+    if (!isSequential) {
+      // 기존 모드: 이전 음성 중단
+      window.speechSynthesis.cancel();
+      clearAllTimeouts();
+    }
+
     // 텍스트를 통째로 재생 (Web Speech API가 자연스럽게 처리)
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = speechRate;
+    // 보교치기 모드일 때는 자연스럽게 들리도록 적절한 속도로 재생
+    utterance.rate = isSequential ? 2.5 : speechRate;
     utterance.pitch = 1.2;
     utterance.volume = 1.0;
     if (heamiVoice) {
       utterance.voice = heamiVoice;
     }
 
-    requestAnimationFrame(() => {
+    if (isSequential) {
+      // 보교치기 모드: 즉시 재생 (딜레이 없음)
       window.speechSynthesis.speak(utterance);
-    });
+    } else {
+      requestAnimationFrame(() => {
+        window.speechSynthesis.speak(utterance);
+      });
+    }
   };
 
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) =>
@@ -161,35 +196,96 @@ export default function TypingPractice() {
     }
   };
 
+  const handleRenameSlot = (slot: number) => {
+    const currentName = slotNames[slot] || `${slot}`;
+    const newName = prompt(`슬롯 ${slot}의 이름을 입력하세요:`, currentName);
+
+    if (newName !== null && newName.trim() !== "") {
+      localStorage.setItem(`slot_${slot}_name`, newName.trim());
+      setSlotNames(prev => ({ ...prev, [slot]: newName.trim() }));
+    }
+  };
+
+  const handleSaveToSlot = () => {
+    if (selectedSlot === null) {
+      alert("저장할 슬롯을 선택하세요");
+      return;
+    }
+    localStorage.setItem(`slot_${selectedSlot}`, inputText);
+    alert(`슬롯 ${selectedSlot}에 저장되었습니다`);
+  };
+
   const handleLoadPreset = (slot: number) => {
-    switch (slot) {
-      case 1:
-        updateInputText(savedText1);
-        break;
-      case 2:
-        updateInputText(savedText2);
-        break;
-      case 3:
-      case 4:
-      case 5:
-        updateInputText(savedText5);
-        break;
-      default:
-        break;
+    setSelectedSlot(slot);
+    const saved = localStorage.getItem(`slot_${slot}`);
+
+    if (saved) {
+      updateInputText(saved);
+    } else {
+      // 기본값 사용
+      switch (slot) {
+        case 1:
+          updateInputText(savedText1);
+          break;
+        case 2:
+          updateInputText(savedText2);
+          break;
+        case 3:
+        case 4:
+        case 5:
+          updateInputText(savedText5);
+          break;
+        default:
+          updateInputText("");
+          break;
+      }
     }
   };
 
   useEffect(() => {
     if (!isPracticing) return;
 
-    if (mode === "words" && shuffledWords.length > 0) {
-      speakText(shuffledWords[currentWordIndex]);
-    } else if (mode === "sentences" && sentences.length > 0) {
-      speakText(sentences[currentSentenceIndex]);
-    } else if (mode === "random" && randomLetters.length > 0) {
-      speakText(randomLetters[currentLetterIndex]);
+    if (mode === "sequential") {
+      // 보교치기 모드: 랜덤 순서로 한 글자씩 표시
+      if (currentDisplayIndex < randomizedIndices.length) {
+        sequentialTimerRef.current = setTimeout(() => {
+          const nextCharIndex = randomizedIndices[currentDisplayIndex];
+          addDisplayedCharIndex(nextCharIndex);
+
+          incrementDisplayIndex();
+
+          // 설정된 글자 수마다 또는 마지막 글자일 때 소리 재생
+          const newDisplayIndex = currentDisplayIndex + 1;
+          if (isSoundEnabled && (newDisplayIndex % charsPerRead === 0 || newDisplayIndex === randomizedIndices.length)) {
+            // 마지막 N글자(또는 남은 글자)를 모아서 읽어줌
+            const startIdx = Math.max(0, newDisplayIndex - charsPerRead);
+            const textToSpeak = randomizedIndices
+              .slice(startIdx, newDisplayIndex)
+              .map(idx => sequentialText[idx])
+              .join('');
+            if (textToSpeak) {
+              speakText(textToSpeak, true);
+            }
+          }
+        }, sequentialSpeed);
+      }
+
+      return () => {
+        if (sequentialTimerRef.current) {
+          clearTimeout(sequentialTimerRef.current);
+        }
+      };
+    } else {
+      // 기존 모드: 음성 재생
+      if (mode === "words" && shuffledWords.length > 0) {
+        speakText(shuffledWords[currentWordIndex]);
+      } else if (mode === "sentences" && sentences.length > 0) {
+        speakText(sentences[currentSentenceIndex]);
+      } else if (mode === "random" && randomLetters.length > 0) {
+        speakText(randomLetters[currentLetterIndex]);
+      }
     }
-  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate]);
+  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate, currentDisplayIndex, randomizedIndices, sequentialSpeed, isSoundEnabled, sequentialText, charsPerRead]);
 
   // 연습 종료 시 결과 초기화
   useEffect(() => {
@@ -211,21 +307,38 @@ export default function TypingPractice() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6 text-center">StenoAgile</h1>
+    <div className="p-4 w-full">
+      <h1 className="text-2xl font-bold mb-4 text-center">StenoAgile</h1>
 
-      <div className="flex flex-col lg:flex-row gap-24">
-        <div className="flex-1 space-y-4">
-          <div className="flex gap-2 mb-2">
-            {[1, 2, 3, 4, 5].map((num) => (
-              <button
-                key={num}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
-                onClick={() => handleLoadPreset(num)}
-              >
-                {num}
-              </button>
-            ))}
+      <div className={`flex ${mode === "sequential" ? "flex-row gap-4" : "flex-col lg:flex-row gap-24"}`}>
+        <div className={mode === "sequential" ? "w-64 space-y-4" : "flex-1 space-y-4"}>
+          <div className="space-y-2 mb-2">
+            <div className="flex flex-wrap gap-1">
+              {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
+                <button
+                  key={num}
+                  className={`px-3 py-1 rounded text-sm ${
+                    selectedSlot === num
+                      ? "bg-blue-500 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                  onClick={() => handleLoadPreset(num)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    handleRenameSlot(num);
+                  }}
+                  title="우클릭하여 이름 변경"
+                >
+                  {slotNames[num] || num}
+                </button>
+              ))}
+            </div>
+            <button
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 w-full"
+              onClick={handleSaveToSlot}
+            >
+              현재 문장 저장
+            </button>
           </div>
           <div className="flex gap-2">
             <button
@@ -252,6 +365,14 @@ export default function TypingPractice() {
             >
               랜덤 연습
             </button>
+            <button
+              className={`px-4 py-2 rounded ${
+                mode === "sequential" ? "bg-blue-500 text-white" : "bg-gray-300"
+              }`}
+              onClick={() => switchMode("sequential")}
+            >
+              보교치기
+            </button>
           </div>
           <textarea
             className="w-full p-2 border rounded"
@@ -260,144 +381,290 @@ export default function TypingPractice() {
             value={inputText}
             onChange={handleTextareaChange}
           />
-          <button
-            className={`px-4 py-2 rounded font-semibold transition ${
-              isPracticing
-                ? "bg-gray-500 text-white hover:bg-gray-600"
-                : "bg-blue-500 text-white hover:bg-blue-600"
-            }`}
-            onClick={handleStartOrStopPractice}
-          >
-            {isPracticing ? "연습 종료" : "연습 시작"}
-          </button>
+          {mode !== "sequential" && (
+            <button
+              className={`px-4 py-2 rounded font-semibold transition ${
+                isPracticing
+                  ? "bg-gray-500 text-white hover:bg-gray-600"
+                  : "bg-blue-500 text-white hover:bg-blue-600"
+              }`}
+              onClick={handleStartOrStopPractice}
+            >
+              {isPracticing ? "연습 종료" : "연습 시작"}
+            </button>
+          )}
         </div>
-        <div className="flex-1 space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <label className="font-medium whitespace-nowrap">읽기 속도:</label>
+        <div className={mode === "sequential" ? "flex-1 flex flex-col gap-4" : "flex-1 space-y-4"}>
+          {mode !== "sequential" && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <label className="font-medium whitespace-nowrap">읽기 속도:</label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      step={0.1}
+                      value={rateToCps(speechRate).toFixed(1)}
+                      onChange={handleCpsChange}
+                      onBlur={(e) => {
+                        if (e.target.value === "") {
+                          changeSpeechRate(cpsToRate(3));
+                        }
+                      }}
+                      className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-gray-600">글자/초</span>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <label className="font-medium whitespace-nowrap">소리:</label>
+                  <button
+                    className={`px-4 py-2 rounded font-medium transition ${
+                      isSoundEnabled
+                        ? "bg-blue-500 text-white hover:bg-blue-600"
+                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                    }`}
+                    onClick={toggleSound}
+                  >
+                    {isSoundEnabled ? "ON" : "OFF"}
+                  </button>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                step={0.1}
+                value={rateToCps(speechRate)}
+                onChange={(e) => {
+                  const cps = parseFloat(e.target.value);
+                  changeSpeechRate(cpsToRate(cps));
+                }}
+                className="w-full"
+              />
+            </div>
+          )}
+
+          {mode === "sequential" && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-4">
                 <div className="flex items-center space-x-2">
+                  <label className="font-medium whitespace-nowrap">표시 속도:</label>
                   <input
                     type="number"
-                    min={0}
+                    min={0.5}
                     max={10}
                     step={0.1}
-                    value={rateToCps(speechRate).toFixed(1)}
-                    onChange={handleCpsChange}
-                    onBlur={(e) => {
-                      if (e.target.value === "") {
-                        changeSpeechRate(cpsToRate(3));
+                    value={(1000 / sequentialSpeed).toFixed(1)}
+                    onChange={(e) => {
+                      const cps = parseFloat(e.target.value);
+                      if (!isNaN(cps) && cps > 0) {
+                        updateSequentialSpeed(Math.round(1000 / cps));
                       }
                     }}
                     className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="text-sm text-gray-600">글자/초</span>
                 </div>
+
+                <div className="flex items-center space-x-2">
+                  <label className="font-medium whitespace-nowrap">글자 크기:</label>
+                  <input
+                    type="number"
+                    min={12}
+                    max={48}
+                    step={2}
+                    value={fontSize}
+                    onChange={(e) => {
+                      const size = parseInt(e.target.value);
+                      if (!isNaN(size) && size >= 12 && size <= 48) {
+                        setFontSize(size);
+                      }
+                    }}
+                    className="w-16 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-600">px</span>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <label className="font-medium whitespace-nowrap">읽기 단위:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    step={1}
+                    value={charsPerRead}
+                    onChange={(e) => {
+                      const count = parseInt(e.target.value);
+                      if (!isNaN(count) && count >= 1 && count <= 50) {
+                        setCharsPerRead(count);
+                      }
+                    }}
+                    className="w-16 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-600">자</span>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <label className="font-medium whitespace-nowrap">글자 표시:</label>
+                  <button
+                    className={`px-4 py-1 rounded font-medium transition ${
+                      showText
+                        ? "bg-blue-500 text-white hover:bg-blue-600"
+                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                    }`}
+                    onClick={() => setShowText(!showText)}
+                  >
+                    {showText ? "ON" : "OFF"}
+                  </button>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <label className="font-medium whitespace-nowrap">소리:</label>
+                  <button
+                    className={`px-4 py-1 rounded font-medium transition ${
+                      isSoundEnabled
+                        ? "bg-blue-500 text-white hover:bg-blue-600"
+                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                    }`}
+                    onClick={toggleSound}
+                  >
+                    {isSoundEnabled ? "ON" : "OFF"}
+                  </button>
+                </div>
+
+                <button
+                  className={`px-4 py-2 rounded font-semibold transition ${
+                    isPracticing
+                      ? "bg-gray-500 text-white hover:bg-gray-600"
+                      : "bg-blue-500 text-white hover:bg-blue-600"
+                  }`}
+                  onClick={handleStartOrStopPractice}
+                >
+                  {isPracticing ? "연습 종료" : "연습 시작"}
+                </button>
               </div>
+
+              {isPracticing && allResults.length > 0 && (
+                <div className="flex items-center space-x-4 text-sm text-gray-600">
+                  <span>평균 타수: {calculateAverage().avgKpm}/분</span>
+                  <span>평균 자수: {calculateAverage().avgCpm}/분</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {mode !== "sequential" && (
+            <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <label className="font-medium whitespace-nowrap">소리:</label>
+                <label className="font-medium whitespace-nowrap">글자 표시:</label>
                 <button
                   className={`px-4 py-2 rounded font-medium transition ${
-                    isSoundEnabled
+                    showText
                       ? "bg-blue-500 text-white hover:bg-blue-600"
                       : "bg-gray-300 text-gray-700 hover:bg-gray-400"
                   }`}
-                  onClick={toggleSound}
+                  onClick={() => setShowText(!showText)}
                 >
-                  {isSoundEnabled ? "ON" : "OFF"}
+                  {showText ? "ON" : "OFF"}
                 </button>
               </div>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={10}
-              step={0.1}
-              value={rateToCps(speechRate)}
-              onChange={(e) => {
-                const cps = parseFloat(e.target.value);
-                changeSpeechRate(cpsToRate(cps));
-              }}
-              className="w-full"
-            />
-          </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <label className="font-medium whitespace-nowrap">글자 표시:</label>
-              <button
-                className={`px-4 py-2 rounded font-medium transition ${
-                  showText
-                    ? "bg-blue-500 text-white hover:bg-blue-600"
-                    : "bg-gray-300 text-gray-700 hover:bg-gray-400"
-                }`}
-                onClick={() => setShowText(!showText)}
-              >
-                {showText ? "ON" : "OFF"}
-              </button>
-            </div>
-
-            {isPracticing && (
-              <div className="flex flex-col items-end space-y-1">
-                <div className="flex items-center space-x-4 text-sm font-medium">
-                  <span className="text-green-600">타수: {lastResult.kpm}/분</span>
-                  <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
-                </div>
-                {allResults.length > 0 && (
-                  <div className="flex items-center space-x-4 text-xs text-gray-600">
-                    <span>평균 타수: {calculateAverage().avgKpm}/분</span>
-                    <span>평균 자수: {calculateAverage().avgCpm}/분</span>
+              {isPracticing && (
+                <div className="flex flex-col items-end space-y-1">
+                  <div className="flex items-center space-x-4 text-sm font-medium">
+                    <span className="text-green-600">타수: {lastResult.kpm}/분</span>
+                    <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {showText && (
-            <p className="text-lg font-semibold">
-              {mode === "words"
-                ? shuffledWords[currentWordIndex]
-                : mode === "sentences"
-                ? sentences[currentSentenceIndex]
-                : randomLetters[currentLetterIndex] ?? ""}
-            </p>
+                  {allResults.length > 0 && (
+                    <div className="flex items-center space-x-4 text-xs text-gray-600">
+                      <span>평균 타수: {calculateAverage().avgKpm}/분</span>
+                      <span>평균 자수: {calculateAverage().avgCpm}/분</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
-          <input
-            type="text"
-            className="w-full p-2 border rounded"
-            value={typedWord}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-          />
-
-          <p className="text-sm font-medium">
-            <span className="text-blue-600">정답: {correctCount}</span> |{" "}
-            <span className="text-rose-600">오답: {incorrectCount}</span> |
-            진행: {progressCount} / {totalCount}
-          </p>
-
-          <div>
-            <h2 className="text-xl font-semibold mb-2">오답 노트</h2>
-            <div className="h-[500px] overflow-y-scroll border rounded p-2">
-              <ul className="space-y-1 text-sm">
-                {incorrectWords.map((item) => (
-                  <li
-                    key={`${item.word}-${item.typed}`}
-                    className="text-rose-600 flex items-center gap-2"
-                  >
-                    <button
-                      className="bg-stone-500 text-white rounded px-2 py-0.5 text-sm"
-                      onClick={() => removeIncorrectWord(item.word, item.typed)}
-                    >
-                      &times;
-                    </button>
-                    {item.word} → {item.typed}
-                  </li>
-                ))}
-              </ul>
+          {showText && mode === "sequential" && (
+            <div className="flex-1 flex flex-col gap-4">
+              <div className="flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 overflow-auto">
+                <p
+                  className="font-semibold whitespace-pre-wrap"
+                  style={{ fontSize: `${fontSize}px` }}
+                >
+                  {randomizedIndices.slice(0, currentDisplayIndex).map(index =>
+                    sequentialText[index]
+                  ).join('')}
+                </p>
+              </div>
+              <div className="flex-1 border-2 border-green-500 rounded bg-green-50 p-4">
+                <input
+                  type="text"
+                  className="w-full h-full p-4 border-2 border-gray-300 rounded text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="여기에 타이핑하세요"
+                  value={typedWord}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
             </div>
-          </div>
+          )}
+
+          {showText && mode !== "sequential" && (
+            <div className="min-h-[200px] p-4 border rounded bg-gray-50">
+              <p className="font-semibold whitespace-pre-wrap">
+                {mode === "words"
+                  ? shuffledWords[currentWordIndex]
+                  : mode === "sentences"
+                  ? sentences[currentSentenceIndex]
+                  : randomLetters[currentLetterIndex] ?? ""}
+              </p>
+            </div>
+          )}
+
+          {mode !== "sequential" && (
+            <>
+              <input
+                type="text"
+                className="w-full p-2 border rounded"
+                value={typedWord}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+              />
+
+              <p className="text-sm font-medium">
+                <span className="text-blue-600">정답: {correctCount}</span> |{" "}
+                <span className="text-rose-600">오답: {incorrectCount}</span> |
+                진행: {progressCount} / {totalCount}
+              </p>
+
+              <div>
+                <h2 className="text-xl font-semibold mb-2">오답 노트</h2>
+                <div className="h-[500px] overflow-y-scroll border rounded p-2">
+                  <ul className="space-y-1 text-sm">
+                    {incorrectWords.map((item) => (
+                      <li
+                        key={`${item.word}-${item.typed}`}
+                        className="text-rose-600 flex items-center gap-2"
+                      >
+                        <button
+                          className="bg-stone-500 text-white rounded px-2 py-0.5 text-sm"
+                          onClick={() => removeIncorrectWord(item.word, item.typed)}
+                        >
+                          &times;
+                        </button>
+                        {item.word} → {item.typed}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
