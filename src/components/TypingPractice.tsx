@@ -57,6 +57,7 @@ export default function TypingPractice() {
   const [fontSize, setFontSize] = useState(18); // 기본 글자 크기 18px
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [charsPerRead, setCharsPerRead] = useState(10); // 몇 글자씩 읽을지
+  const [sequentialSpeechRate, setSequentialSpeechRate] = useState(2.5); // 보교치기 음성 속도
 
   // 슬롯 이름 불러오기
   useEffect(() => {
@@ -104,7 +105,7 @@ export default function TypingPractice() {
     // 텍스트를 통째로 재생 (Web Speech API가 자연스럽게 처리)
     const utterance = new SpeechSynthesisUtterance(text);
     // 보교치기 모드일 때는 자연스럽게 들리도록 적절한 속도로 재생
-    utterance.rate = isSequential ? 2.5 : speechRate;
+    utterance.rate = isSequential ? sequentialSpeechRate : speechRate;
     utterance.pitch = 1.2;
     utterance.volume = 1.0;
     if (heamiVoice) {
@@ -467,6 +468,25 @@ export default function TypingPractice() {
                     className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="text-sm text-gray-600">글자/초</span>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <label className="font-medium whitespace-nowrap">음성 속도:</label>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={10}
+                    step={0.1}
+                    value={sequentialSpeechRate.toFixed(1)}
+                    onChange={(e) => {
+                      const rate = parseFloat(e.target.value);
+                      if (!isNaN(rate) && rate >= 0.1 && rate <= 10) {
+                        setSequentialSpeechRate(rate);
+                      }
+                    }}
+                    className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-600">배속</span>
                 </div>
 
                 <div className="flex items-center space-x-2">
