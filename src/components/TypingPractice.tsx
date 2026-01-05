@@ -622,12 +622,11 @@ export default function TypingPractice() {
                 </p>
               </div>
               <div className="flex-1 border-2 border-green-500 rounded bg-green-50 p-4">
-                <input
-                  type="text"
-                  className="w-full h-full p-4 border-2 border-gray-300 rounded text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                <textarea
+                  className="w-full h-full p-4 border-2 border-gray-300 rounded text-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                   placeholder="여기에 타이핑하세요"
                   value={typedWord}
-                  onChange={handleInputChange}
+                  onChange={(e) => updateTypedWord(e.target.value)}
                   onKeyDown={handleKeyDown}
                 />
               </div>
