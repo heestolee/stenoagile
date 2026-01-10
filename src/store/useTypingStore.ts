@@ -55,6 +55,7 @@ interface TypingState {
   updateSequentialSpeed: (speed: number) => void;
   resetSequential: () => void;
   incrementDisplayIndex: () => void;
+  restartSequentialPractice: () => void;
 
   startPractice: (words: string[]) => void;
   stopPractice: () => void;
@@ -140,6 +141,24 @@ export const useTypingStore = create<TypingState>()(
       incrementDisplayIndex: () => set((state) => ({
         currentDisplayIndex: state.currentDisplayIndex + 1
       })),
+
+      restartSequentialPractice: () => {
+        const state = get();
+        // 기존 텍스트를 유지하면서 새로운 랜덤 순서로 재시작
+        const text = state.inputText.replace(/\s+/g, '');
+        const indices = Array.from({ length: text.length }, (_, i) => i);
+        const shuffledIndices = [...indices].sort(() => Math.random() - 0.5);
+
+        set({
+          sequentialText: text,
+          displayedCharIndices: new Set<number>(),
+          randomizedIndices: shuffledIndices,
+          currentDisplayIndex: 0,
+          typedWord: "",
+          currentWordStartTime: null,
+          currentWordKeystrokes: 0,
+        });
+      },
 
       startPractice: (words) => {
         const state = get();

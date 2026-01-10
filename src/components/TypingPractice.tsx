@@ -37,27 +37,29 @@ export default function TypingPractice() {
     incrementCurrentWordKeystrokes,
     resetCurrentWordTracking,
     sequentialText,
-    displayedCharIndices,
     sequentialSpeed,
     randomizedIndices,
     currentDisplayIndex,
     addDisplayedCharIndex,
     updateSequentialSpeed,
     incrementDisplayIndex,
+    restartSequentialPractice,
   } = useTypingStore();
 
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [showText, setShowText] = useState(true);
   const timeoutIds = useRef<number[]>([]);
-  const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0 });
-  const [allResults, setAllResults] = useState<{ kpm: number, cpm: number }[]>([]);
-  const sequentialTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0, elapsedTime: 0 });
+  const [allResults, setAllResults] = useState<{ kpm: number, cpm: number, elapsedTime: number }[]>([]);
+  const sequentialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [slotNames, setSlotNames] = useState<{ [key: number]: string }>({});
   const [fontSize, setFontSize] = useState(18); // 기본 글자 크기 18px
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [charsPerRead, setCharsPerRead] = useState(10); // 몇 글자씩 읽을지
   const [sequentialSpeechRate, setSequentialSpeechRate] = useState(2.5); // 보교치기 음성 속도
+  const [countdown, setCountdown] = useState<number | null>(null); // 카운트다운 상태
+  const [roundStartTime, setRoundStartTime] = useState<number | null>(null); // 라운드 시작 시간
+  const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 슬롯 이름 불러오기
   useEffect(() => {
@@ -90,6 +92,40 @@ export default function TypingPractice() {
   const clearAllTimeouts = () => {
     timeoutIds.current.forEach(clearTimeout);
     timeoutIds.current = [];
+  };
+
+  // 경과 시간을 "분:초" 형태로 포맷팅
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // 카운트다운 시작 함수
+  const startCountdown = (onComplete: () => void) => {
+    setCountdown(5);
+    let count = 5;
+
+    const tick = () => {
+      count -= 1;
+      if (count > 0) {
+        setCountdown(count);
+        countdownTimerRef.current = setTimeout(tick, 1000);
+      } else {
+        setCountdown(null);
+        onComplete();
+      }
+    };
+
+    countdownTimerRef.current = setTimeout(tick, 1000);
+  };
+
+  // 다음 라운드 시작 (카운트다운 포함)
+  const startNextRound = () => {
+    startCountdown(() => {
+      setRoundStartTime(Date.now());
+      restartSequentialPractice();
+    });
   };
 
   const speakText = (text: string, isSequential = false) => {
@@ -128,9 +164,34 @@ export default function TypingPractice() {
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) =>
     updateTypedWord(event.target.value);
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (event.key === "Enter") {
-      // 엔터를 칠 때 최종 결과 계산
+      // 보교치기 모드에서는 다른 처리
+      if (mode === "sequential" && isPracticing) {
+        event.preventDefault();
+
+        // 결과 계산
+        if (currentWordStartTime && currentWordKeystrokes > 0) {
+          const elapsedMs = Date.now() - currentWordStartTime;
+          const elapsedMinutes = elapsedMs / 1000 / 60;
+          const elapsedSeconds = roundStartTime ? Math.round((Date.now() - roundStartTime) / 1000) : 0;
+
+          if (elapsedMinutes > 0) {
+            const kpm = Math.round(currentWordKeystrokes / elapsedMinutes);
+            const charCount = typedWord.trim().replace(/\s+/g, '').length;
+            const cpm = Math.round(charCount / elapsedMinutes);
+            setLastResult({ kpm, cpm, elapsedTime: elapsedSeconds });
+            setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedSeconds }]);
+          }
+        }
+
+        resetCurrentWordTracking();
+        // 다음 라운드 시작 (카운트다운 포함)
+        startNextRound();
+        return;
+      }
+
+      // 기존 모드에서의 엔터 처리
       if (currentWordStartTime && currentWordKeystrokes > 0) {
         const elapsedMs = Date.now() - currentWordStartTime;
         const elapsedMinutes = elapsedMs / 1000 / 60;
@@ -139,8 +200,8 @@ export default function TypingPractice() {
           const kpm = Math.round(currentWordKeystrokes / elapsedMinutes);
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
           const cpm = Math.round(charCount / elapsedMinutes);
-          setLastResult({ kpm, cpm });
-          setAllResults(prev => [...prev, { kpm, cpm }]);
+          setLastResult({ kpm, cpm, elapsedTime: 0 });
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: 0 }]);
         }
       }
 
@@ -185,14 +246,29 @@ export default function TypingPractice() {
   };
 
   const handleStartOrStopPractice = () => {
-    if (isPracticing) {
+    // 카운트다운 중이거나 연습 중이면 중지
+    if (isPracticing || countdown !== null) {
       window.speechSynthesis.cancel();
       clearAllTimeouts();
+      if (countdownTimerRef.current) {
+        clearTimeout(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+      setCountdown(null);
+      setRoundStartTime(null);
       stopPractice();
     } else {
       const words = inputText.trim().split("/").filter(Boolean);
       if (words.length > 0) {
-        startPractice(words);
+        if (mode === "sequential") {
+          // 보교치기 모드: 카운트다운 후 시작
+          startCountdown(() => {
+            setRoundStartTime(Date.now());
+            startPractice(words);
+          });
+        } else {
+          startPractice(words);
+        }
       }
     }
   };
@@ -290,20 +366,22 @@ export default function TypingPractice() {
 
   // 연습 종료 시 결과 초기화
   useEffect(() => {
-    if (!isPracticing) {
-      setLastResult({ kpm: 0, cpm: 0 });
+    if (!isPracticing && countdown === null) {
+      setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
       setAllResults([]);
     }
-  }, [isPracticing]);
+  }, [isPracticing, countdown]);
 
   // 평균 계산
   const calculateAverage = () => {
-    if (allResults.length === 0) return { avgKpm: 0, avgCpm: 0 };
+    if (allResults.length === 0) return { avgKpm: 0, avgCpm: 0, avgTime: 0 };
     const totalKpm = allResults.reduce((sum, result) => sum + result.kpm, 0);
     const totalCpm = allResults.reduce((sum, result) => sum + result.cpm, 0);
+    const totalTime = allResults.reduce((sum, result) => sum + result.elapsedTime, 0);
     return {
       avgKpm: Math.round(totalKpm / allResults.length),
-      avgCpm: Math.round(totalCpm / allResults.length)
+      avgCpm: Math.round(totalCpm / allResults.length),
+      avgTime: Math.round(totalTime / allResults.length)
     };
   };
 
@@ -557,20 +635,24 @@ export default function TypingPractice() {
 
                 <button
                   className={`px-4 py-2 rounded font-semibold transition ${
-                    isPracticing
+                    isPracticing || countdown !== null
                       ? "bg-gray-500 text-white hover:bg-gray-600"
                       : "bg-blue-500 text-white hover:bg-blue-600"
                   }`}
                   onClick={handleStartOrStopPractice}
                 >
-                  {isPracticing ? "연습 종료" : "연습 시작"}
+                  {countdown !== null ? `${countdown}초` : isPracticing ? "연습 종료" : "연습 시작"}
                 </button>
               </div>
 
-              {isPracticing && allResults.length > 0 && (
+              {(isPracticing || countdown !== null) && allResults.length > 0 && (
                 <div className="flex items-center space-x-4 text-sm text-gray-600">
                   <span>평균 타수: {calculateAverage().avgKpm}/분</span>
                   <span>평균 자수: {calculateAverage().avgCpm}/분</span>
+                  <span>평균 시간: {formatTime(calculateAverage().avgTime)}</span>
+                  {lastResult.elapsedTime > 0 && (
+                    <span className="text-blue-600">최근: {formatTime(lastResult.elapsedTime)}</span>
+                  )}
                 </div>
               )}
             </div>
@@ -611,15 +693,21 @@ export default function TypingPractice() {
 
           {showText && mode === "sequential" && (
             <div className="flex-1 flex flex-col gap-4">
-              <div className="flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 overflow-auto">
-                <p
-                  className="font-semibold whitespace-pre-wrap"
-                  style={{ fontSize: `${fontSize}px` }}
-                >
-                  {randomizedIndices.slice(0, currentDisplayIndex).map(index =>
-                    sequentialText[index]
-                  ).join('')}
-                </p>
+              <div className={`flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 overflow-hidden ${countdown !== null ? 'flex items-center justify-center' : ''}`}>
+                {countdown !== null ? (
+                  <p className="text-8xl font-bold text-blue-600 animate-pulse">
+                    {countdown}
+                  </p>
+                ) : (
+                  <p
+                    className="font-semibold whitespace-pre-wrap w-full"
+                    style={{ fontSize: `${fontSize}px` }}
+                  >
+                    {randomizedIndices.slice(0, currentDisplayIndex).map(index =>
+                      sequentialText[index]
+                    ).join('')}
+                  </p>
+                )}
               </div>
               <div className="flex-1 border-2 border-green-500 rounded bg-green-50 p-4">
                 <textarea
