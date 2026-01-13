@@ -59,7 +59,7 @@ export default function TypingPractice() {
   const [charsPerRead, setCharsPerRead] = useState(3); // 몇 글자씩 읽을지
   const [sequentialSpeechRate, setSequentialSpeechRate] = useState(2.5); // 보교치기 음성 속도
   const [countdown, setCountdown] = useState<number | null>(null); // 카운트다운 상태
-  const [roundStartTime, setRoundStartTime] = useState<number | null>(null); // 라운드 시작 시간
+  const [, setRoundStartTime] = useState<number | null>(null); // 라운드 시작 시간
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isRoundComplete, setIsRoundComplete] = useState(false); // 라운드 완료 상태 (결과 확인 대기)
   const [accumulatedKeystrokes, setAccumulatedKeystrokes] = useState(0); // 누적 타수
