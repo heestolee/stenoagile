@@ -1,13 +1,61 @@
-import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useCallback } from "react";
 import { useTypingStore } from "../store/useTypingStore";
 import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
 import { savedText1, savedText2, savedText5 } from "../constants";
+
+// IndexedDB 헬퍼 함수들
+const DB_NAME = 'StenoAgileDB';
+const STORE_NAME = 'videos';
+
+const openDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+      }
+    };
+  });
+};
+
+const saveVideosToDB = async (files: { name: string; data: ArrayBuffer }[]) => {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const store = tx.objectStore(STORE_NAME);
+
+  // 기존 데이터 삭제
+  store.clear();
+
+  // 새 데이터 저장
+  files.forEach((file, index) => {
+    store.add({ id: index, name: file.name, data: file.data });
+  });
+
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+};
+
+const loadVideosFromDB = async (): Promise<{ name: string; data: ArrayBuffer }[]> => {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, 'readonly');
+  const store = tx.objectStore(STORE_NAME);
+  const request = store.getAll();
+
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result.map(r => ({ name: r.name, data: r.data })));
+    request.onerror = () => reject(request.error);
+  });
+};
 
 export default function TypingPractice() {
   const {
     inputText,
     shuffledWords,
-    randomLetters,
     sentences,
     currentWordIndex,
     currentSentenceIndex,
@@ -65,6 +113,222 @@ export default function TypingPractice() {
   const [accumulatedKeystrokes, setAccumulatedKeystrokes] = useState(0); // 누적 타수
   const [accumulatedElapsedMs, setAccumulatedElapsedMs] = useState(0); // 누적 경과 시간
   const [displayElapsedTime, setDisplayElapsedTime] = useState(0); // 실시간 표시용 경과 시간
+  const [videoPlaylist, setVideoPlaylist] = useState<{ name: string; url: string; data?: ArrayBuffer }[]>([]); // 재생목록
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0); // 현재 재생 중인 영상 인덱스
+  const [savedVideoTime, setSavedVideoTime] = useState<number>(0); // 저장된 재생 위치
+  const videoTimeUpdateRef = useRef<number>(0); // 재생 위치 저장용
+  const [videoPlaybackRate, setVideoPlaybackRate] = useState(1); // 동영상 재생 속도
+  const [videoVolume, setVideoVolume] = useState(0.05); // 동영상 볼륨 (0~1)
+  const [videoLoop, setVideoLoop] = useState(false); // 반복 재생
+  const [playlistLoop, setPlaylistLoop] = useState(false); // 재생목록 반복
+  const [abRepeat, setAbRepeat] = useState<{ a: number | null; b: number | null }>({ a: null, b: null }); // 구간 반복
+  const [skipSeconds, setSkipSeconds] = useState(5); // 건너뛰기 초
+  const [isDragging, setIsDragging] = useState(false); // 드래그 상태
+  const videoRef = useRef<HTMLVideoElement | null>(null); // 비디오 요소 참조
+  const dropZoneRef = useRef<HTMLDivElement | null>(null); // 드롭 존 참조
+
+  // 매매치라 모드 상태
+  const [isBatchMode, setIsBatchMode] = useState(false); // 매매치라 모드 활성화 여부
+  const [batchSize, setBatchSize] = useState(5); // 한번에 보여줄 글자 수
+  const [batchStartIndex, setBatchStartIndex] = useState(0); // 현재 배치 시작 인덱스
+  const [currentBatchChars, setCurrentBatchChars] = useState<string>(""); // 현재 배치에 표시된 글자들
+
+  // 현재 재생 중인 영상 URL
+  const videoSrc = videoPlaylist.length > 0 ? videoPlaylist[currentVideoIndex]?.url : null;
+
+  // IndexedDB에 재생목록 저장
+  const savePlaylistToDB = useCallback(async (playlist: { name: string; url: string; data?: ArrayBuffer }[]) => {
+    const dataToSave = playlist
+      .filter(v => v.data)
+      .map(v => ({ name: v.name, data: v.data! }));
+    if (dataToSave.length > 0) {
+      await saveVideosToDB(dataToSave);
+    }
+  }, []);
+
+  // 재생목록에 영상/오디오 추가
+  const addVideosToPlaylist = async (files: FileList | File[]) => {
+    const mediaExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.mp3', '.wav', '.m4a', '.aac'];
+    const existingNames = new Set(videoPlaylist.map(v => v.name));
+    const validFiles = Array.from(files).filter(file => {
+      // 이미 있는 파일은 제외
+      if (existingNames.has(file.name)) return false;
+      if (file.type.startsWith('video/') || file.type.startsWith('audio/')) return true;
+      const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+      return mediaExtensions.includes(ext);
+    });
+
+    // 파일 데이터를 ArrayBuffer로 읽기
+    const newVideos = await Promise.all(
+      validFiles.map(async (file) => {
+        const data = await file.arrayBuffer();
+        const blob = new Blob([data], { type: file.type || 'video/mp4' });
+        return {
+          name: file.name,
+          url: URL.createObjectURL(blob),
+          data
+        };
+      })
+    );
+
+    if (newVideos.length > 0) {
+      setVideoPlaylist(prev => {
+        const wasEmpty = prev.length === 0;
+        if (wasEmpty) {
+          setCurrentVideoIndex(0);
+          setSavedVideoTime(0);
+        }
+        const updated = [...prev, ...newVideos];
+        // IndexedDB에 저장
+        savePlaylistToDB(updated);
+        return updated;
+      });
+    }
+  };
+
+  // 재생목록에서 영상 제거
+  const removeVideoFromPlaylist = (index: number) => {
+    const video = videoPlaylist[index];
+    if (video) {
+      URL.revokeObjectURL(video.url);
+    }
+    setVideoPlaylist(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      savePlaylistToDB(updated);
+      return updated;
+    });
+    // 현재 재생 중인 영상이 삭제된 경우 처리
+    if (index === currentVideoIndex) {
+      setCurrentVideoIndex(Math.min(index, videoPlaylist.length - 2));
+      setSavedVideoTime(0);
+    } else if (index < currentVideoIndex) {
+      setCurrentVideoIndex(prev => prev - 1);
+    }
+  };
+
+  // 재생목록 전체 삭제
+  const clearPlaylist = async () => {
+    videoPlaylist.forEach(video => URL.revokeObjectURL(video.url));
+    setVideoPlaylist([]);
+    setCurrentVideoIndex(0);
+    setSavedVideoTime(0);
+    localStorage.removeItem('videoCurrentIndex');
+    localStorage.removeItem('videoCurrentTime');
+    // IndexedDB 비우기
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).clear();
+  };
+
+  // 이전 영상
+  const playPreviousVideo = () => {
+    if (videoPlaylist.length === 0) return;
+    if (currentVideoIndex > 0) {
+      setCurrentVideoIndex(prev => prev - 1);
+    } else if (playlistLoop) {
+      setCurrentVideoIndex(videoPlaylist.length - 1);
+    }
+  };
+
+  // 다음 영상
+  const playNextVideo = () => {
+    if (videoPlaylist.length === 0) return;
+    if (currentVideoIndex < videoPlaylist.length - 1) {
+      setCurrentVideoIndex(prev => prev + 1);
+    } else if (playlistLoop) {
+      setCurrentVideoIndex(0);
+    }
+  };
+
+  // 드래그 앤 드롭 핸들러
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // relatedTarget이 드롭존 밖으로 나갔을 때만 드래그 상태 해제
+    const rect = dropZoneRef.current?.getBoundingClientRect();
+    if (rect) {
+      const { clientX, clientY } = e;
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        setIsDragging(false);
+      }
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      addVideosToPlaylist(files);
+    }
+  };
+
+  // 브라우저 기본 드래그 앤 드롭 동작 방지 및 파일 처리 (TEST 모드에서만)
+  useEffect(() => {
+    if (mode !== "random") return;
+
+    const handleDocumentDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      // 드롭 존 위에 있으면 드래그 상태 표시
+      if (dropZoneRef.current) {
+        const rect = dropZoneRef.current.getBoundingClientRect();
+        const isOverDropZone = e.clientX >= rect.left && e.clientX <= rect.right &&
+                               e.clientY >= rect.top && e.clientY <= rect.bottom;
+        setIsDragging(isOverDropZone);
+      }
+    };
+
+    const handleDocumentDrop = (e: DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+
+      // 드롭 존 위에서 드롭된 경우에만 파일 처리
+      if (dropZoneRef.current && e.dataTransfer?.files) {
+        const rect = dropZoneRef.current.getBoundingClientRect();
+        const isOverDropZone = e.clientX >= rect.left && e.clientX <= rect.right &&
+                               e.clientY >= rect.top && e.clientY <= rect.bottom;
+        if (isOverDropZone && e.dataTransfer.files.length > 0) {
+          addVideosToPlaylist(e.dataTransfer.files);
+        }
+      }
+    };
+
+    const handleDocumentDragLeave = (e: DragEvent) => {
+      // 문서 밖으로 나가면 드래그 상태 해제
+      if (e.clientX <= 0 || e.clientY <= 0 ||
+          e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+        setIsDragging(false);
+      }
+    };
+
+    document.addEventListener('dragover', handleDocumentDragOver);
+    document.addEventListener('drop', handleDocumentDrop);
+    document.addEventListener('dragleave', handleDocumentDragLeave);
+
+    return () => {
+      document.removeEventListener('dragover', handleDocumentDragOver);
+      document.removeEventListener('drop', handleDocumentDrop);
+      document.removeEventListener('dragleave', handleDocumentDragLeave);
+    };
+  }, [mode]);
 
   // 슬롯 이름 불러오기
   useEffect(() => {
@@ -77,6 +341,54 @@ export default function TypingPractice() {
     }
     setSlotNames(savedNames);
   }, []);
+
+  // IndexedDB에서 재생목록 복원
+  useEffect(() => {
+    const restorePlaylist = async () => {
+      try {
+        const savedVideos = await loadVideosFromDB();
+        if (savedVideos.length > 0) {
+          const restoredPlaylist = savedVideos.map(v => {
+            const blob = new Blob([v.data], { type: 'video/mp4' });
+            return {
+              name: v.name,
+              url: URL.createObjectURL(blob),
+              data: v.data
+            };
+          });
+          setVideoPlaylist(restoredPlaylist);
+
+          // 저장된 인덱스와 재생 위치 복원
+          const savedIndex = localStorage.getItem('videoCurrentIndex');
+          const savedTime = localStorage.getItem('videoCurrentTime');
+          if (savedIndex !== null) {
+            const idx = parseInt(savedIndex);
+            if (idx >= 0 && idx < restoredPlaylist.length) {
+              setCurrentVideoIndex(idx);
+            }
+          }
+          if (savedTime !== null) {
+            setSavedVideoTime(parseFloat(savedTime));
+          }
+        }
+      } catch (e) {
+        console.error('재생목록 복원 실패:', e);
+      }
+    };
+    restorePlaylist();
+  }, []);
+
+  // 재생 위치 주기적 저장
+  useEffect(() => {
+    const saveInterval = setInterval(() => {
+      if (videoRef.current && !videoRef.current.paused) {
+        localStorage.setItem('videoCurrentTime', videoRef.current.currentTime.toString());
+        localStorage.setItem('videoCurrentIndex', currentVideoIndex.toString());
+      }
+    }, 1000);
+
+    return () => clearInterval(saveInterval);
+  }, [currentVideoIndex]);
 
   // Microsoft Heami 음성 로드
   useEffect(() => {
@@ -132,6 +444,12 @@ export default function TypingPractice() {
     setAccumulatedElapsedMs(0);
     setDisplayElapsedTime(0);
     updateTypedWord(""); // 타이핑 칸 초기화
+    // 매매치라 모드 초기화
+    setBatchStartIndex(0);
+    setCurrentBatchChars("");
+    // 타수/자수 초기화
+    setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
+    setAllResults([]);
     startCountdown(() => {
       setRoundStartTime(Date.now());
       restartSequentialPractice();
@@ -176,8 +494,8 @@ export default function TypingPractice() {
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (event.key === "Enter") {
-      // 보교치기 모드에서는 다른 처리
-      if (mode === "sequential" && isPracticing) {
+      // 보교치기/랜덤 모드에서는 다른 처리
+      if ((mode === "sequential" || mode === "random") && isPracticing) {
         event.preventDefault();
 
         // 라운드 완료 상태에서 엔터 누르면 다음 라운드 시작
@@ -190,15 +508,18 @@ export default function TypingPractice() {
         const currentElapsedMs = currentWordStartTime ? Date.now() - currentWordStartTime : 0;
         const totalKeystrokes = accumulatedKeystrokes + currentWordKeystrokes;
         const totalElapsedMs = accumulatedElapsedMs + currentElapsedMs;
-        const totalElapsedMinutes = totalElapsedMs / 1000 / 60;
         const elapsedSeconds = Math.round(totalElapsedMs / 1000);
 
-        if (totalElapsedMinutes > 0 && totalKeystrokes > 0) {
-          const kpm = Math.round(totalKeystrokes / totalElapsedMinutes);
+        // 최소 1초 이상 경과해야 계산 (비정상적인 값 방지)
+        if (totalElapsedMs >= 1000 && totalKeystrokes > 0) {
+          const totalElapsedMinutes = totalElapsedMs / 1000 / 60;
+          const kpm = Math.min(3000, Math.round(totalKeystrokes / totalElapsedMinutes));
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
-          const cpm = Math.round(charCount / totalElapsedMinutes);
+          const cpm = Math.min(3000, Math.round(charCount / totalElapsedMinutes));
           setLastResult({ kpm, cpm, elapsedTime: elapsedSeconds });
           setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedSeconds }]);
+        } else if (totalElapsedMs > 0) {
+          setLastResult({ kpm: 0, cpm: 0, elapsedTime: elapsedSeconds });
         }
 
         // 누적 값 업데이트
@@ -213,12 +534,13 @@ export default function TypingPractice() {
       // 기존 모드에서의 엔터 처리
       if (currentWordStartTime && currentWordKeystrokes > 0) {
         const elapsedMs = Date.now() - currentWordStartTime;
-        const elapsedMinutes = elapsedMs / 1000 / 60;
 
-        if (elapsedMinutes > 0) {
-          const kpm = Math.round(currentWordKeystrokes / elapsedMinutes);
+        // 최소 1초 이상 경과해야 계산 (비정상적인 값 방지)
+        if (elapsedMs >= 1000) {
+          const elapsedMinutes = elapsedMs / 1000 / 60;
+          const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
-          const cpm = Math.round(charCount / elapsedMinutes);
+          const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
           setLastResult({ kpm, cpm, elapsedTime: 0 });
           setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: 0 }]);
         }
@@ -245,8 +567,8 @@ export default function TypingPractice() {
 
     // 제외된 키가 아니면 타수 증가 (Backspace, Delete, Space 포함)
     if (!excludedKeys.includes(event.key)) {
-      // 보교치기 모드에서 라운드 완료 상태일 때 타이핑 시작하면 자동으로 재개
-      if (mode === "sequential" && isRoundComplete) {
+      // 보교치기/랜덤 모드에서 라운드 완료 상태일 때 타이핑 시작하면 자동으로 재개
+      if ((mode === "sequential" || mode === "random") && isRoundComplete) {
         setIsRoundComplete(false);
       }
 
@@ -285,12 +607,18 @@ export default function TypingPractice() {
       setAccumulatedElapsedMs(0);
       setDisplayElapsedTime(0);
       resetCurrentWordTracking();
+      // 매매치라 모드 초기화
+      setBatchStartIndex(0);
+      setCurrentBatchChars("");
       stopPractice();
     } else {
       const words = inputText.trim().split("/").filter(Boolean);
       if (words.length > 0) {
-        if (mode === "sequential") {
-          // 보교치기 모드: 카운트다운 후 시작
+        // 매매치라 모드 초기화
+        setBatchStartIndex(0);
+        setCurrentBatchChars("");
+        if (mode === "sequential" || mode === "random") {
+          // 보교치기/랜덤 모드: 카운트다운 후 시작
           startCountdown(() => {
             setRoundStartTime(Date.now());
             startPractice(words);
@@ -351,11 +679,25 @@ export default function TypingPractice() {
   useEffect(() => {
     if (!isPracticing) return;
 
-    if (mode === "sequential") {
+    if (mode === "sequential" || mode === "random") {
       // 라운드 완료 상태면 글자 표시 멈춤
       if (isRoundComplete) return;
 
-      // 보교치기 모드: 랜덤 순서로 한 글자씩 표시
+      // 매매치라 모드: batchSize만큼 한번에 표시
+      if (isBatchMode) {
+        if (batchStartIndex < randomizedIndices.length && currentBatchChars === "") {
+          // 현재 배치의 글자들 계산
+          const endIndex = Math.min(batchStartIndex + batchSize, randomizedIndices.length);
+          const batchChars = randomizedIndices
+            .slice(batchStartIndex, endIndex)
+            .map(idx => sequentialText[idx])
+            .join('');
+          setCurrentBatchChars(batchChars);
+        }
+        return;
+      }
+
+      // 보교치기/랜덤 모드: 랜덤 순서로 한 글자씩 표시
       if (currentDisplayIndex < randomizedIndices.length) {
         sequentialTimerRef.current = setTimeout(() => {
           const nextCharIndex = randomizedIndices[currentDisplayIndex];
@@ -390,11 +732,54 @@ export default function TypingPractice() {
         speakText(shuffledWords[currentWordIndex]);
       } else if (mode === "sentences" && sentences.length > 0) {
         speakText(sentences[currentSentenceIndex]);
-      } else if (mode === "random" && randomLetters.length > 0) {
-        speakText(randomLetters[currentLetterIndex]);
       }
     }
-  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate, currentDisplayIndex, randomizedIndices, sequentialSpeed, isSoundEnabled, sequentialText, charsPerRead, isRoundComplete]);
+  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate, currentDisplayIndex, randomizedIndices, sequentialSpeed, isSoundEnabled, sequentialText, charsPerRead, isRoundComplete, isBatchMode, batchSize, batchStartIndex, currentBatchChars]);
+
+  // 매매치라 모드: 타이핑 확인 및 다음 배치로 이동
+  useEffect(() => {
+    if (!isPracticing || !isBatchMode || isRoundComplete) return;
+    if (currentBatchChars === "") return;
+
+    // 띄어쓰기 제거하고 비교 (마지막에 제시어가 정확히 나오면 정답)
+    const typedClean = typedWord.replace(/\s+/g, '');
+    const targetClean = currentBatchChars.replace(/\s+/g, '');
+
+    if (typedClean.endsWith(targetClean) && targetClean.length > 0) {
+      // 타수/자수 계산
+      if (currentWordStartTime && currentWordKeystrokes > 0) {
+        const elapsedMs = Date.now() - currentWordStartTime;
+        const elapsedSeconds = Math.round(elapsedMs / 1000);
+
+        // 최소 1초 이상 경과해야 계산 (비정상적인 값 방지)
+        if (elapsedMs >= 1000) {
+          const elapsedMinutes = elapsedMs / 1000 / 60;
+          const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
+          const charCount = typedClean.length;
+          const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
+          setLastResult({ kpm, cpm, elapsedTime: elapsedSeconds });
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedSeconds }]);
+        } else if (elapsedMs > 0) {
+          // 1초 미만이면 간단히 저장 (시간만)
+          setLastResult({ kpm: 0, cpm: 0, elapsedTime: elapsedSeconds });
+        }
+      }
+      resetCurrentWordTracking();
+
+      // 정답! 다음 배치로 이동
+      const nextBatchStart = batchStartIndex + batchSize;
+
+      if (nextBatchStart >= randomizedIndices.length) {
+        // 모든 글자 완료 - 한 사이클 끝
+        setIsRoundComplete(true);
+      } else {
+        // 다음 배치 준비
+        setBatchStartIndex(nextBatchStart);
+        setCurrentBatchChars("");
+        updateTypedWord("");
+      }
+    }
+  }, [typedWord, currentBatchChars, isPracticing, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isRoundComplete, currentWordStartTime, currentWordKeystrokes]);
 
   // 연습 종료 시 결과 초기화
   useEffect(() => {
@@ -421,6 +806,112 @@ export default function TypingPractice() {
     return () => clearInterval(interval);
   }, [isPracticing, countdown, isRoundComplete, currentWordStartTime, accumulatedElapsedMs]);
 
+  // TEST 모드 동영상 단축키
+  useEffect(() => {
+    if (mode !== "random") return;
+
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      // 타이핑 영역에서는 단축키 무시 (textarea, input)
+      const target = e.target as HTMLElement;
+      if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") return;
+
+      const video = videoRef.current;
+      if (!video) return;
+
+      switch (e.key.toLowerCase()) {
+        case " ": // 스페이스: 재생/일시정지
+          e.preventDefault();
+          if (video.paused) video.play();
+          else video.pause();
+          break;
+        case "arrowleft": // 왼쪽: 뒤로 건너뛰기
+          e.preventDefault();
+          video.currentTime = Math.max(0, video.currentTime - skipSeconds);
+          break;
+        case "arrowright": // 오른쪽: 앞으로 건너뛰기
+          e.preventDefault();
+          video.currentTime = Math.min(video.duration, video.currentTime + skipSeconds);
+          break;
+        case "arrowup": // 위쪽: 볼륨 업
+          e.preventDefault();
+          const newVolUp = Math.min(1, videoVolume + 0.1);
+          setVideoVolume(newVolUp);
+          video.volume = newVolUp;
+          break;
+        case "arrowdown": // 아래쪽: 볼륨 다운
+          e.preventDefault();
+          const newVolDown = Math.max(0, videoVolume - 0.1);
+          setVideoVolume(newVolDown);
+          video.volume = newVolDown;
+          break;
+        case ",": // < : 속도 감소
+        case "<":
+          e.preventDefault();
+          const newRateDown = Math.max(0.25, videoPlaybackRate - 0.25);
+          setVideoPlaybackRate(newRateDown);
+          video.playbackRate = newRateDown;
+          break;
+        case ".": // > : 속도 증가
+        case ">":
+          e.preventDefault();
+          const newRateUp = Math.min(4, videoPlaybackRate + 0.25);
+          setVideoPlaybackRate(newRateUp);
+          video.playbackRate = newRateUp;
+          break;
+        case "l": // L: 반복 토글
+          e.preventDefault();
+          setVideoLoop(!videoLoop);
+          video.loop = !videoLoop;
+          break;
+        case "f": // F: 전체화면
+          e.preventDefault();
+          if (document.fullscreenElement) document.exitFullscreen();
+          else video.requestFullscreen();
+          break;
+        case "p": // P: PIP
+          e.preventDefault();
+          if (document.pictureInPictureEnabled) {
+            if (document.pictureInPictureElement) document.exitPictureInPicture();
+            else video.requestPictureInPicture();
+          }
+          break;
+        case "m": // M: 음소거 토글
+          e.preventDefault();
+          video.muted = !video.muted;
+          break;
+        case "home": // Home: 처음으로
+          e.preventDefault();
+          video.currentTime = 0;
+          break;
+        case "end": // End: 끝으로
+          e.preventDefault();
+          video.currentTime = video.duration;
+          break;
+        case "a": // A: A-B 구간 설정
+          e.preventDefault();
+          if (abRepeat.a === null) {
+            setAbRepeat({ a: video.currentTime, b: null });
+          } else if (abRepeat.b === null) {
+            setAbRepeat({ ...abRepeat, b: video.currentTime });
+          } else {
+            setAbRepeat({ a: null, b: null });
+          }
+          break;
+        case "n": // N: 다음 영상
+          e.preventDefault();
+          playNextVideo();
+          break;
+        case "b": // B: 이전 영상
+          e.preventDefault();
+          playPreviousVideo();
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mode, videoVolume, videoPlaybackRate, videoLoop, skipSeconds, abRepeat, videoPlaylist.length, currentVideoIndex, playlistLoop]);
+
   // 평균 계산
   const calculateAverage = () => {
     if (allResults.length === 0) return { avgKpm: 0, avgCpm: 0, avgTime: 0 };
@@ -438,78 +929,178 @@ export default function TypingPractice() {
     <div className="p-4 w-full">
       <h1 className="text-2xl font-bold mb-4 text-center">StenoAgile</h1>
 
-      <div className={`flex ${mode === "sequential" ? "flex-row gap-4" : "flex-col lg:flex-row gap-24"}`}>
-        <div className={mode === "sequential" ? "w-64 space-y-4" : "flex-1 space-y-4"}>
-          <div className="space-y-2 mb-2">
-            <div className="flex flex-wrap gap-1">
-              {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
-                <button
-                  key={num}
-                  className={`px-3 py-1 rounded text-sm ${
-                    selectedSlot === num
-                      ? "bg-blue-500 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                  }`}
-                  onClick={() => handleLoadPreset(num)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    handleRenameSlot(num);
-                  }}
-                  title="우클릭하여 이름 변경"
-                >
-                  {slotNames[num] || num}
-                </button>
-              ))}
+      <div className={`flex ${mode === "sequential" ? "flex-row gap-4" : mode === "random" ? "flex-row gap-2" : "flex-col lg:flex-row gap-24"}`}>
+        <div className={mode === "random" ? "w-28 flex flex-col gap-1 flex-shrink-0" : mode === "sequential" ? "w-64 space-y-4" : "flex-1 space-y-4"}>
+          {mode !== "random" && (
+            <div className="space-y-2 mb-2">
+              <div className="flex flex-wrap gap-1">
+                {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
+                  <button
+                    key={num}
+                    className={`px-3 py-1 rounded text-sm ${
+                      selectedSlot === num
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    }`}
+                    onClick={() => handleLoadPreset(num)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      handleRenameSlot(num);
+                    }}
+                    title="우클릭하여 이름 변경"
+                  >
+                    {slotNames[num] || num}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 w-full"
+                onClick={handleSaveToSlot}
+              >
+                현재 문장 저장
+              </button>
             </div>
+          )}
+          <div className={mode === "random" ? "flex flex-wrap gap-1" : "flex gap-2"}>
             <button
-              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 w-full"
-              onClick={handleSaveToSlot}
-            >
-              현재 문장 저장
-            </button>
-          </div>
-          <div className="flex gap-2">
-            <button
-              className={`px-4 py-2 rounded ${
+              className={`${mode === "random" ? "px-2 py-1 text-xs" : "px-4 py-2"} rounded ${
                 mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
               }`}
               onClick={() => switchMode("words")}
             >
-              단어 연습
+              단어
             </button>
             <button
-              className={`px-4 py-2 rounded ${
+              className={`${mode === "random" ? "px-2 py-1 text-xs" : "px-4 py-2"} rounded ${
                 mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
               }`}
               onClick={() => switchMode("sentences")}
             >
-              문장 연습
+              문장
             </button>
             <button
-              className={`px-4 py-2 rounded ${
+              className={`${mode === "random" ? "px-2 py-1 text-xs" : "px-4 py-2"} rounded ${
                 mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
               }`}
               onClick={() => switchMode("random")}
             >
-              랜덤 연습
+              듣고치라
             </button>
             <button
-              className={`px-4 py-2 rounded ${
+              className={`${mode === "random" ? "px-2 py-1 text-xs" : "px-4 py-2"} rounded ${
                 mode === "sequential" ? "bg-blue-500 text-white" : "bg-gray-300"
               }`}
               onClick={() => switchMode("sequential")}
             >
-              보교치기
+              보고치라
             </button>
           </div>
-          <textarea
-            className="w-full p-2 border rounded"
-            rows={25}
-            placeholder="연습할 단어들을 입력하세요 (/로 구분)"
-            value={inputText}
-            onChange={handleTextareaChange}
-          />
-          {mode !== "sequential" && (
+          {mode === "random" && (
+            <>
+              <div className="flex items-center gap-1 mt-1">
+                <label className="text-xs">글자</label>
+                <input
+                  type="number"
+                  min={12}
+                  max={48}
+                  step={0.1}
+                  value={inputFontSize}
+                  onChange={(e) => {
+                    const size = parseFloat(e.target.value);
+                    if (!isNaN(size) && size >= 12 && size <= 48) {
+                      setInputFontSize(size);
+                    }
+                  }}
+                  className="w-12 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex items-center gap-1 mt-1">
+                <label className="text-xs">속도</label>
+                <input
+                  type="number"
+                  min={0.25}
+                  max={4}
+                  step={0.25}
+                  value={videoPlaybackRate}
+                  onChange={(e) => {
+                    const rate = parseFloat(e.target.value);
+                    if (!isNaN(rate) && rate >= 0.25 && rate <= 4) {
+                      setVideoPlaybackRate(rate);
+                      if (videoRef.current) {
+                        videoRef.current.playbackRate = rate;
+                      }
+                    }
+                  }}
+                  className="w-12 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-xs">x</span>
+              </div>
+              <div className="flex items-center gap-1 mt-1">
+                <label className="text-xs">볼륨</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(videoVolume * 100)}
+                  onChange={(e) => {
+                    const vol = Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) / 100;
+                    setVideoVolume(vol);
+                    if (videoRef.current) {
+                      videoRef.current.volume = vol;
+                    }
+                  }}
+                  className="w-12 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-xs">%</span>
+              </div>
+              {videoPlaylist.length > 0 && (
+                <div className="mt-1 border border-gray-300 rounded bg-gray-50 overflow-hidden flex flex-col flex-1">
+                  <div className="bg-gray-200 px-1 py-0.5 text-xs font-semibold border-b">
+                    목록 ({videoPlaylist.length})
+                  </div>
+                  <div className="flex-1 overflow-y-auto">
+                    {videoPlaylist.map((video, index) => (
+                      <div
+                        key={index}
+                        className={`flex items-center gap-1 px-1 py-0.5 cursor-pointer hover:bg-gray-100 ${
+                          index === currentVideoIndex ? 'bg-blue-100 border-l-2 border-blue-500' : ''
+                        }`}
+                        onClick={() => {
+                          setCurrentVideoIndex(index);
+                          setAbRepeat({ a: null, b: null });
+                        }}
+                      >
+                        <span className="text-xs text-gray-500 w-3">{index + 1}</span>
+                        <span className="flex-1 text-xs truncate" title={video.name}>
+                          {video.name}
+                        </span>
+                        <button
+                          className="text-red-500 hover:text-red-700 text-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeVideoFromPlaylist(index);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {mode !== "random" && (
+            <textarea
+              className="w-full p-2 border rounded"
+              rows={25}
+              placeholder="연습할 단어들을 입력하세요 (/로 구분)"
+              value={inputText}
+              onChange={handleTextareaChange}
+            />
+          )}
+          {mode !== "sequential" && mode !== "random" && (
             <button
               className={`px-4 py-2 rounded font-semibold transition ${
                 isPracticing
@@ -522,8 +1113,8 @@ export default function TypingPractice() {
             </button>
           )}
         </div>
-        <div className={mode === "sequential" ? "flex-1 flex flex-col gap-4" : "flex-1 space-y-4"}>
-          {mode !== "sequential" && (
+        <div className={mode === "sequential" || mode === "random" ? "flex-1 flex flex-col gap-4" : "flex-1 space-y-4"}>
+          {mode !== "sequential" && mode !== "random" && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
@@ -575,7 +1166,7 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {mode === "sequential" && (
+          {(mode === "sequential") && (
             <div className="space-y-2">
               <div className="flex items-center gap-4">
                 <div className="flex items-center space-x-2">
@@ -593,6 +1184,7 @@ export default function TypingPractice() {
                       }
                     }}
                     className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={isBatchMode}
                   />
                   <span className="text-sm text-gray-600">글자/초</span>
                 </div>
@@ -622,7 +1214,7 @@ export default function TypingPractice() {
                     type="number"
                     min={12}
                     max={48}
-                    step={0.5}
+                    step={0.1}
                     value={displayFontSize}
                     onChange={(e) => {
                       const size = parseFloat(e.target.value);
@@ -641,7 +1233,7 @@ export default function TypingPractice() {
                     type="number"
                     min={12}
                     max={48}
-                    step={0.5}
+                    step={0.1}
                     value={inputFontSize}
                     onChange={(e) => {
                       const size = parseFloat(e.target.value);
@@ -713,6 +1305,40 @@ export default function TypingPractice() {
                 </button>
               </div>
 
+              <div className="flex items-center gap-4">
+                <div className="flex items-center space-x-2">
+                  <button
+                    className={`px-3 py-1 rounded font-medium transition ${
+                      isBatchMode
+                        ? "bg-purple-500 text-white hover:bg-purple-600"
+                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                    }`}
+                    onClick={() => setIsBatchMode(!isBatchMode)}
+                  >
+                    매매치라
+                  </button>
+                  {isBatchMode && (
+                    <>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        step={1}
+                        value={batchSize}
+                        onChange={(e) => {
+                          const size = parseInt(e.target.value);
+                          if (!isNaN(size) && size >= 1 && size <= 100) {
+                            setBatchSize(size);
+                          }
+                        }}
+                        className="w-16 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <span className="text-sm text-gray-600">글자</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
               {(isPracticing || countdown !== null || isRoundComplete) && (
                 <div className="flex items-center space-x-4 text-sm">
                   {isRoundComplete ? (
@@ -725,7 +1351,26 @@ export default function TypingPractice() {
                     </>
                   ) : (
                     <>
-                      {allResults.length > 0 && (
+                      {isBatchMode && (
+                        <>
+                          <span className="text-purple-600 font-semibold">
+                            진행: {Math.min(batchStartIndex + batchSize, randomizedIndices.length)}/{randomizedIndices.length}
+                          </span>
+                          {lastResult.kpm > 0 && (
+                            <>
+                              <span className="text-blue-600 font-semibold">타수: {lastResult.kpm}/분</span>
+                              <span className="text-green-600 font-semibold">자수: {lastResult.cpm}/분</span>
+                            </>
+                          )}
+                          {allResults.length > 1 && (
+                            <>
+                              <span className="text-gray-600">평균 타수: {calculateAverage().avgKpm}/분</span>
+                              <span className="text-gray-600">평균 자수: {calculateAverage().avgCpm}/분</span>
+                            </>
+                          )}
+                        </>
+                      )}
+                      {!isBatchMode && allResults.length > 0 && (
                         <>
                           <span className="text-gray-600">평균 타수: {calculateAverage().avgKpm}/분</span>
                           <span className="text-gray-600">평균 자수: {calculateAverage().avgCpm}/분</span>
@@ -739,7 +1384,7 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {mode !== "sequential" && (
+          {mode !== "sequential" && mode !== "random" && (
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <label className="font-medium whitespace-nowrap">글자 표시:</label>
@@ -772,50 +1417,321 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {showText && mode === "sequential" && (
+          {showText && (mode === "sequential") && (
             <div className="flex-1 flex flex-col gap-4">
-              <div className={`flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 overflow-hidden ${countdown !== null ? 'flex items-center justify-center' : ''}`}>
+              <div className={`flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 overflow-hidden ${(countdown !== null || isRoundComplete) ? 'flex flex-col items-center justify-center' : ''}`}>
                 {countdown !== null ? (
-                  <p className="text-8xl font-bold text-blue-600 animate-pulse">
-                    {countdown}
-                  </p>
+                  <>
+                    {selectedSlot !== null && (
+                      <p className="text-xl font-semibold text-gray-600 mb-4">
+                        {slotNames[selectedSlot] || `슬롯 ${selectedSlot}`}
+                      </p>
+                    )}
+                    <p className="text-8xl font-bold text-blue-600 animate-pulse">
+                      {countdown}
+                    </p>
+                  </>
+                ) : isRoundComplete ? (
+                  <>
+                    <p className="text-4xl font-bold text-green-600 mb-4">
+                      라운드 완료!
+                    </p>
+                    <div className="text-xl space-y-2 text-center">
+                      <p className="text-blue-600 font-semibold">타수: {lastResult.kpm}/분</p>
+                      <p className="text-purple-600 font-semibold">자수: {lastResult.cpm}/분</p>
+                      <p className="text-orange-600 font-semibold">시간: {formatTime(lastResult.elapsedTime)}</p>
+                      {allResults.length > 1 && (
+                        <>
+                          <p className="text-gray-600 mt-4">평균 타수: {calculateAverage().avgKpm}/분</p>
+                          <p className="text-gray-600">평균 자수: {calculateAverage().avgCpm}/분</p>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-gray-500 mt-6">(엔터를 눌러 다시 시작)</p>
+                  </>
                 ) : (
                   <p
                     className="font-semibold whitespace-pre-wrap w-full"
                     style={{ fontSize: `${displayFontSize}px`, lineHeight: 1.5 }}
                   >
-                    {randomizedIndices.slice(0, currentDisplayIndex).map(index =>
-                      sequentialText[index]
-                    ).join('')}
+                    {isBatchMode
+                      ? currentBatchChars
+                      : randomizedIndices.slice(0, currentDisplayIndex).map(index =>
+                          sequentialText[index]
+                        ).join('')}
                   </p>
                 )}
               </div>
               <div className="flex-1 border-2 border-green-500 rounded bg-green-50 p-4">
                 <textarea
                   className="w-full h-full p-4 border-2 border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  style={{ fontSize: `${inputFontSize}px`, lineHeight: 1.5 }}
+                  style={{ fontSize: `${inputFontSize}px`, lineHeight: 1.5, imeMode: 'active' } as React.CSSProperties}
                   placeholder="여기에 타이핑하세요"
                   value={typedWord}
                   onChange={(e) => updateTypedWord(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  lang="ko"
                 />
               </div>
             </div>
           )}
 
-          {showText && mode !== "sequential" && (
+          {mode === "random" && (
+            <div className="flex-1 flex flex-col gap-2">
+              {/* 재생 컨트롤 */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                  onClick={playPreviousVideo}
+                  disabled={videoPlaylist.length === 0}
+                >
+                  ⏮ 이전
+                </button>
+                <button
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                  onClick={() => {
+                    if (videoRef.current) {
+                      videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds);
+                    }
+                  }}
+                >
+                  ◀ {skipSeconds}초
+                </button>
+                <button
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                  onClick={() => {
+                    if (videoRef.current) {
+                      if (videoRef.current.paused) {
+                        videoRef.current.play();
+                      } else {
+                        videoRef.current.pause();
+                      }
+                    }
+                  }}
+                >
+                  ▶ / ⏸
+                </button>
+                <button
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                  onClick={() => {
+                    if (videoRef.current) {
+                      videoRef.current.currentTime = Math.min(
+                        videoRef.current.duration,
+                        videoRef.current.currentTime + skipSeconds
+                      );
+                    }
+                  }}
+                >
+                  {skipSeconds}초 ▶
+                </button>
+                <button
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                  onClick={playNextVideo}
+                  disabled={videoPlaylist.length === 0}
+                >
+                  다음 ⏭
+                </button>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm">건너뛰기:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={skipSeconds}
+                    onChange={(e) => setSkipSeconds(Math.max(1, Math.min(60, parseInt(e.target.value) || 5)))}
+                    className="w-12 px-1 py-1 border rounded text-sm"
+                  />
+                  <span className="text-sm">초</span>
+                </div>
+                <button
+                  className={`px-3 py-1 rounded text-sm ${videoLoop ? "bg-blue-500 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                  onClick={() => {
+                    setVideoLoop(!videoLoop);
+                    if (videoRef.current) {
+                      videoRef.current.loop = !videoLoop;
+                    }
+                  }}
+                >
+                  영상반복 {videoLoop ? "ON" : "OFF"}
+                </button>
+                <button
+                  className={`px-3 py-1 rounded text-sm ${playlistLoop ? "bg-purple-500 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                  onClick={() => setPlaylistLoop(!playlistLoop)}
+                >
+                  목록반복 {playlistLoop ? "ON" : "OFF"}
+                </button>
+                <button
+                  className={`px-3 py-1 rounded text-sm ${abRepeat.a !== null ? "bg-green-500 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                  onClick={() => {
+                    if (videoRef.current) {
+                      if (abRepeat.a === null) {
+                        setAbRepeat({ a: videoRef.current.currentTime, b: null });
+                      } else if (abRepeat.b === null) {
+                        setAbRepeat({ ...abRepeat, b: videoRef.current.currentTime });
+                      } else {
+                        setAbRepeat({ a: null, b: null });
+                      }
+                    }
+                  }}
+                >
+                  {abRepeat.a === null ? "A-B 시작" : abRepeat.b === null ? "B 지점" : "A-B 해제"}
+                </button>
+                {abRepeat.a !== null && (
+                  <span className="text-xs text-gray-600">
+                    A: {Math.floor(abRepeat.a)}초 {abRepeat.b !== null && `→ B: ${Math.floor(abRepeat.b)}초`}
+                  </span>
+                )}
+                <button
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                  onClick={() => {
+                    if (videoRef.current && document.pictureInPictureEnabled) {
+                      if (document.pictureInPictureElement) {
+                        document.exitPictureInPicture();
+                      } else {
+                        videoRef.current.requestPictureInPicture();
+                      }
+                    }
+                  }}
+                >
+                  PIP
+                </button>
+                <button
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                  onClick={() => {
+                    if (videoRef.current) {
+                      if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                      } else {
+                        videoRef.current.requestFullscreen();
+                      }
+                    }
+                  }}
+                >
+                  전체화면
+                </button>
+                {videoPlaylist.length > 0 && (
+                  <button
+                    className="px-3 py-1 bg-red-400 text-white rounded hover:bg-red-500 text-sm"
+                    onClick={clearPlaylist}
+                  >
+                    목록 삭제
+                  </button>
+                )}
+              </div>
+
+              {/* 단축키 안내 */}
+              <div className="text-xs text-gray-500 flex flex-wrap gap-x-3">
+                <span>Space: 재생/정지</span>
+                <span>←/→: 건너뛰기</span>
+                <span>↑/↓: 볼륨</span>
+                <span>&lt;/&gt;: 속도</span>
+                <span>B/N: 이전/다음</span>
+                <span>L: 영상반복</span>
+                <span>A: 구간반복</span>
+                <span>M: 음소거</span>
+                <span>F: 전체화면</span>
+                <span>P: PIP</span>
+                <span>Home/End: 처음/끝</span>
+              </div>
+
+              {/* 동영상 영역 */}
+              <div className="flex-1 flex gap-2" style={{ height: "75vh" }}>
+                {/* 동영상 플레이어 */}
+                <div
+                  ref={dropZoneRef}
+                  className={`flex-1 border-2 rounded overflow-hidden bg-black relative ${isDragging ? 'border-green-500 border-4' : 'border-blue-500'}`}
+                  onDragEnter={handleDragEnter}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  {/* 드래그 오버레이 */}
+                  {isDragging && (
+                    <div className="absolute inset-0 bg-green-500 bg-opacity-50 z-10 flex items-center justify-center pointer-events-none">
+                      <span className="text-white text-2xl font-bold">여기에 영상 파일을 놓으세요</span>
+                    </div>
+                  )}
+                  {videoSrc ? (
+                    <video
+                      ref={videoRef}
+                      src={videoSrc}
+                      className="w-full h-full object-contain"
+                      style={{ height: "75vh" }}
+                      controls
+                      autoPlay
+                      loop={videoLoop}
+                      disablePictureInPicture
+                      controlsList="noplaybackrate"
+                      onLoadedMetadata={() => {
+                        if (videoRef.current) {
+                          videoRef.current.playbackRate = videoPlaybackRate;
+                          videoRef.current.volume = videoVolume;
+                          videoRef.current.loop = videoLoop;
+                          // 저장된 재생 위치로 이동 (localStorage에서 직접 읽어서 모드 전환 후에도 복원)
+                          const savedTime = localStorage.getItem('videoCurrentTime');
+                          const savedIndex = localStorage.getItem('videoCurrentIndex');
+                          if (savedTime !== null && savedIndex !== null && parseInt(savedIndex) === currentVideoIndex) {
+                            videoRef.current.currentTime = parseFloat(savedTime);
+                          }
+                        }
+                      }}
+                      onTimeUpdate={() => {
+                        if (videoRef.current && abRepeat.a !== null && abRepeat.b !== null) {
+                          if (videoRef.current.currentTime >= abRepeat.b) {
+                            videoRef.current.currentTime = abRepeat.a;
+                          }
+                        }
+                      }}
+                      onEnded={() => {
+                        // 영상 끝나면 다음 영상 재생 (영상반복이 꺼져있을 때만)
+                        if (!videoLoop && videoPlaylist.length > 1) {
+                          if (currentVideoIndex < videoPlaylist.length - 1) {
+                            setCurrentVideoIndex(prev => prev + 1);
+                          } else if (playlistLoop) {
+                            setCurrentVideoIndex(0);
+                          }
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 bg-gray-900 gap-2">
+                      <span className="text-4xl">📁</span>
+                      <span>동영상 파일을 드래그하거나 선택하세요</span>
+                      <span className="text-sm">(여러 파일 선택 가능)</span>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* 타이핑 영역 */}
+              <div className="flex-1 border-2 border-green-500 rounded bg-green-50 p-4">
+                <textarea
+                  className="w-full h-full p-4 border-2 border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  style={{ fontSize: `${inputFontSize}px`, lineHeight: 1.5, imeMode: 'active' } as React.CSSProperties}
+                  placeholder="여기에 타이핑하세요"
+                  value={typedWord}
+                  onChange={(e) => updateTypedWord(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  lang="ko"
+                />
+              </div>
+            </div>
+          )}
+
+          {showText && mode !== "sequential" && mode !== "random" && (
             <div className="min-h-[200px] p-4 border rounded bg-gray-50">
               <p className="font-semibold whitespace-pre-wrap">
                 {mode === "words"
                   ? shuffledWords[currentWordIndex]
                   : mode === "sentences"
                   ? sentences[currentSentenceIndex]
-                  : randomLetters[currentLetterIndex] ?? ""}
+                  : ""}
               </p>
             </div>
           )}
 
-          {mode !== "sequential" && (
+          {mode !== "sequential" && mode !== "random" && (
             <>
               <input
                 type="text"
