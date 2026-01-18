@@ -1760,7 +1760,7 @@ export default function TypingPractice() {
 
               {/* YouTube 영역 */}
               {videoSourceTab === 'youtube' && (
-                <div className="flex-1 flex gap-2" style={{ height: "75vh" }}>
+                <div className="flex gap-2" style={{ height: "60vh" }}>
                   <div className="flex-1 border-2 border-red-500 rounded overflow-hidden bg-black">
                     {youtubeVideoId ? (
                       <iframe
