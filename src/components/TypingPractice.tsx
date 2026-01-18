@@ -1,3 +1,4 @@
+//테스트용 주석 추가
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useCallback } from "react";
 import { useTypingStore } from "../store/useTypingStore";
 import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
