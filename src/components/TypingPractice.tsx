@@ -4,6 +4,8 @@ import { useTypingStore } from "../store/useTypingStore";
 import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
 import { savedText1, savedText2, savedText5 } from "../constants";
 
+const unusedVariable = "이 변수는 사용되지 않음";
+
 // IndexedDB 헬퍼 함수들
 const DB_NAME = 'StenoAgileDB';
 const STORE_NAME = 'videos';
