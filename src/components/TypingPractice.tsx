@@ -132,8 +132,26 @@ export default function TypingPractice() {
   const [batchStartIndex, setBatchStartIndex] = useState(0); // 현재 배치 시작 인덱스
   const [currentBatchChars, setCurrentBatchChars] = useState<string>(""); // 현재 배치에 표시된 글자들
 
+  // YouTube 관련 상태
+  const [videoSourceTab, setVideoSourceTab] = useState<'upload' | 'youtube'>('upload');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
+
   // 현재 재생 중인 영상 URL
   const videoSrc = videoPlaylist.length > 0 ? videoPlaylist[currentVideoIndex]?.url : null;
+
+  // YouTube URL에서 video ID 추출
+  const extractYoutubeVideoId = (url: string): string | null => {
+    const pattern = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/;
+    const match = url.match(pattern);
+    return match ? match[1] : null;
+  };
+
+  // YouTube URL 입력 처리
+  const handleYoutubeUrlSubmit = () => {
+    const videoId = extractYoutubeVideoId(youtubeUrl);
+    setYoutubeVideoId(videoId);
+  };
 
   // IndexedDB에 재생목록 저장
   const savePlaylistToDB = useCallback(async (playlist: { name: string; url: string; data?: ArrayBuffer }[]) => {
@@ -1470,7 +1488,25 @@ export default function TypingPractice() {
 
           {mode === "random" && (
             <div className="flex-1 flex flex-col gap-2">
-              {/* 재생 컨트롤 */}
+              {/* 탭 UI */}
+              <div className="flex gap-2">
+                <button
+                  className={`px-4 py-2 rounded font-medium ${videoSourceTab === 'upload' ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  onClick={() => setVideoSourceTab('upload')}
+                >
+                  파일 업로드
+                </button>
+                <button
+                  className={`px-4 py-2 rounded font-medium ${videoSourceTab === 'youtube' ? 'bg-red-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  onClick={() => setVideoSourceTab('youtube')}
+                >
+                  YouTube 링크
+                </button>
+              </div>
+
+              {/* 재생 컨트롤 - 파일 업로드 탭에서만 표시 */}
+              {videoSourceTab === 'upload' && (
+              <>
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
@@ -1625,8 +1661,33 @@ export default function TypingPractice() {
                 <span>P: PIP</span>
                 <span>Home/End: 처음/끝</span>
               </div>
+              </>
+              )}
 
-              {/* 동영상 영역 */}
+              {/* YouTube 탭 콘텐츠 */}
+              {videoSourceTab === 'youtube' && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="YouTube URL을 입력하세요 (예: https://youtube.com/watch?v=...)"
+                    value={youtubeUrl}
+                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleYoutubeUrlSubmit();
+                    }}
+                    className="flex-1 px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                  <button
+                    className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                    onClick={handleYoutubeUrlSubmit}
+                  >
+                    재생
+                  </button>
+                </div>
+              )}
+
+              {/* 동영상 영역 - 파일 업로드 탭 */}
+              {videoSourceTab === 'upload' && (
               <div className="flex-1 flex gap-2" style={{ height: "75vh" }}>
                 {/* 동영상 플레이어 */}
                 <div
@@ -1695,6 +1756,29 @@ export default function TypingPractice() {
                 </div>
 
               </div>
+              )}
+
+              {/* YouTube 영역 */}
+              {videoSourceTab === 'youtube' && (
+                <div className="flex gap-2" style={{ height: "60vh" }}>
+                  <div className="flex-1 border-2 border-red-500 rounded overflow-hidden bg-black">
+                    {youtubeVideoId ? (
+                      <iframe
+                        src={`https://www.youtube.com/embed/${youtubeVideoId}?autoplay=1`}
+                        className="w-full h-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        title="YouTube video"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 bg-gray-900 gap-2">
+                        <span className="text-4xl">▶️</span>
+                        <span>YouTube URL을 입력하고 재생 버튼을 누르세요</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* 타이핑 영역 */}
               <div className="flex-1 border-2 border-green-500 rounded bg-green-50 p-4">
