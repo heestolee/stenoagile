@@ -115,8 +115,6 @@ export default function TypingPractice() {
   const [displayElapsedTime, setDisplayElapsedTime] = useState(0); // 실시간 표시용 경과 시간
   const [videoPlaylist, setVideoPlaylist] = useState<{ name: string; url: string; data?: ArrayBuffer }[]>([]); // 재생목록
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0); // 현재 재생 중인 영상 인덱스
-  const [savedVideoTime, setSavedVideoTime] = useState<number>(0); // 저장된 재생 위치
-  const videoTimeUpdateRef = useRef<number>(0); // 재생 위치 저장용
   const [videoPlaybackRate, setVideoPlaybackRate] = useState(1); // 동영상 재생 속도
   const [videoVolume, setVideoVolume] = useState(0.05); // 동영상 볼륨 (0~1)
   const [videoLoop, setVideoLoop] = useState(false); // 반복 재생
@@ -176,7 +174,6 @@ export default function TypingPractice() {
         const wasEmpty = prev.length === 0;
         if (wasEmpty) {
           setCurrentVideoIndex(0);
-          setSavedVideoTime(0);
         }
         const updated = [...prev, ...newVideos];
         // IndexedDB에 저장
@@ -200,7 +197,6 @@ export default function TypingPractice() {
     // 현재 재생 중인 영상이 삭제된 경우 처리
     if (index === currentVideoIndex) {
       setCurrentVideoIndex(Math.min(index, videoPlaylist.length - 2));
-      setSavedVideoTime(0);
     } else if (index < currentVideoIndex) {
       setCurrentVideoIndex(prev => prev - 1);
     }
@@ -211,7 +207,6 @@ export default function TypingPractice() {
     videoPlaylist.forEach(video => URL.revokeObjectURL(video.url));
     setVideoPlaylist([]);
     setCurrentVideoIndex(0);
-    setSavedVideoTime(0);
     localStorage.removeItem('videoCurrentIndex');
     localStorage.removeItem('videoCurrentTime');
     // IndexedDB 비우기
@@ -358,17 +353,13 @@ export default function TypingPractice() {
           });
           setVideoPlaylist(restoredPlaylist);
 
-          // 저장된 인덱스와 재생 위치 복원
+          // 저장된 인덱스 복원
           const savedIndex = localStorage.getItem('videoCurrentIndex');
-          const savedTime = localStorage.getItem('videoCurrentTime');
           if (savedIndex !== null) {
             const idx = parseInt(savedIndex);
             if (idx >= 0 && idx < restoredPlaylist.length) {
               setCurrentVideoIndex(idx);
             }
-          }
-          if (savedTime !== null) {
-            setSavedVideoTime(parseFloat(savedTime));
           }
         }
       } catch (e) {
