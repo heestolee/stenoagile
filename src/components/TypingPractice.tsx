@@ -1,8 +1,9 @@
 //테스트용 주석 추가
-import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useCallback } from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useTypingStore } from "../store/useTypingStore";
 import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
 import { savedText1, savedText2, savedText5 } from "../constants";
+import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../utils/scoringAnalysis";
 
 // IndexedDB 헬퍼 함수들
 const DB_NAME = 'StenoAgileDB';
@@ -125,6 +126,7 @@ export default function TypingPractice() {
   const [isDragging, setIsDragging] = useState(false); // 드래그 상태
   const videoRef = useRef<HTMLVideoElement | null>(null); // 비디오 요소 참조
   const dropZoneRef = useRef<HTMLDivElement | null>(null); // 드롭 존 참조
+  const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // 타이핑 칸 참조
 
   // 매매치라 모드 상태
   const [isBatchMode, setIsBatchMode] = useState(false); // 매매치라 모드 활성화 여부
@@ -136,6 +138,23 @@ export default function TypingPractice() {
   const [videoSourceTab, setVideoSourceTab] = useState<'upload' | 'youtube'>('upload');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
+
+  // 하이라이트용 상태 (아래칸 hover 시 윗칸 해당 위치 표시)
+  const [hoveredOrigIdx, setHoveredOrigIdx] = useState<number | null>(null);
+
+  // 라운드 완료 후 연습용 텍스트
+  const [practiceText, setPracticeText] = useState("");
+
+  // 재개 직후 하이라이트 표시용
+  const [showResumeHighlight, setShowResumeHighlight] = useState(false);
+  const [resumePosition, setResumePosition] = useState(0);
+
+  // 오늘 완료한 라운드 수
+  const [todayCompletedRounds, setTodayCompletedRounds] = useState(0);
+  // 슬롯별 완료한 라운드 수
+  const [slotCompletedRounds, setSlotCompletedRounds] = useState<Record<number, number>>({});
+  // 연습 시작 시 슬롯 저장 (도중에 다른 슬롯 눌러도 표시 안 바뀌게)
+  const [practiceSlot, setPracticeSlot] = useState<number | null>(null);
 
   // 현재 재생 중인 영상 URL
   const videoSrc = videoPlaylist.length > 0 ? videoPlaylist[currentVideoIndex]?.url : null;
@@ -344,7 +363,7 @@ export default function TypingPractice() {
     };
   }, [mode]);
 
-  // 슬롯 이름 불러오기
+  // 슬롯 이름 불러오기 및 현재 텍스트와 일치하는 슬롯 찾기
   useEffect(() => {
     const savedNames: { [key: number]: string } = {};
     for (let i = 1; i <= 20; i++) {
@@ -354,6 +373,15 @@ export default function TypingPractice() {
       }
     }
     setSlotNames(savedNames);
+
+    // 현재 inputText와 일치하는 슬롯 찾기
+    for (let i = 1; i <= 20; i++) {
+      const slotContent = localStorage.getItem(`slot_${i}`);
+      if (slotContent && slotContent === inputText) {
+        setSelectedSlot(i);
+        break;
+      }
+    }
   }, []);
 
   // IndexedDB에서 재생목록 복원
@@ -416,16 +444,55 @@ export default function TypingPractice() {
     window.speechSynthesis.onvoiceschanged = loadHeami;
   }, []);
 
+  // 오늘 완료한 라운드 수 불러오기
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const savedData = localStorage.getItem('completedRounds');
+    if (savedData) {
+      const parsed = JSON.parse(savedData);
+      if (parsed.date === today) {
+        setTodayCompletedRounds(parsed.count || 0);
+        setSlotCompletedRounds(parsed.slotCounts || {});
+      } else {
+        // 날짜가 바뀌면 초기화
+        localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, slotCounts: {} }));
+        setTodayCompletedRounds(0);
+        setSlotCompletedRounds({});
+      }
+    } else {
+      localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, slotCounts: {} }));
+    }
+  }, []);
+
+  // 라운드 완료 카운트 증가
+  const incrementCompletedRounds = useCallback((slot: number | null) => {
+    const today = new Date().toISOString().split('T')[0];
+    setTodayCompletedRounds(prev => {
+      const newCount = prev + 1;
+      // 슬롯별 카운트도 업데이트
+      setSlotCompletedRounds(prevSlots => {
+        const newSlotCounts = { ...prevSlots };
+        if (slot !== null) {
+          newSlotCounts[slot] = (newSlotCounts[slot] || 0) + 1;
+        }
+        localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: newCount, slotCounts: newSlotCounts }));
+        return newSlotCounts;
+      });
+      return newCount;
+    });
+  }, []);
+
   const clearAllTimeouts = () => {
     timeoutIds.current.forEach(clearTimeout);
     timeoutIds.current = [];
   };
 
-  // 경과 시간을 "분:초" 형태로 포맷팅
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  // 경과 시간을 "분:초.밀리초" 형태로 포맷팅 (밀리초 단위 입력)
+  const formatTime = (ms: number): string => {
+    const totalSeconds = ms / 1000;
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}:${secs.toFixed(3).padStart(6, '0')}`;
   };
 
   // 카운트다운 시작 함수
@@ -447,6 +514,25 @@ export default function TypingPractice() {
     countdownTimerRef.current = setTimeout(tick, 1000);
   };
 
+  // 라운드 재개 (일시정지에서 이어서)
+  const resumeRound = () => {
+    // 재개 위치 저장 및 하이라이트 표시
+    const typedLen = typedWord.replace(/\s+/g, '').length;
+    setResumePosition(typedLen);
+    setShowResumeHighlight(true);
+
+    setIsRoundComplete(false);
+    setPracticeText(""); // 연습 텍스트 초기화
+    // 타이핑 칸에 포커스하고 커서를 끝으로 이동
+    setTimeout(() => {
+      const textarea = typingTextareaRef.current;
+      if (textarea) {
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      }
+    }, 50);
+  };
+
   // 다음 라운드 시작 (카운트다운 포함)
   const startNextRound = () => {
     setIsRoundComplete(false);
@@ -454,6 +540,8 @@ export default function TypingPractice() {
     setAccumulatedElapsedMs(0);
     setDisplayElapsedTime(0);
     updateTypedWord(""); // 타이핑 칸 초기화
+    setPracticeText(""); // 연습 텍스트 초기화
+    setShowResumeHighlight(false); // 하이라이트 초기화
     // 매매치라 모드 초기화
     setBatchStartIndex(0);
     setCurrentBatchChars("");
@@ -463,6 +551,8 @@ export default function TypingPractice() {
     startCountdown(() => {
       setRoundStartTime(Date.now());
       restartSequentialPractice();
+      // 타이핑 칸에 포커스
+      setTimeout(() => typingTextareaRef.current?.focus(), 50);
     });
   };
 
@@ -508,9 +598,17 @@ export default function TypingPractice() {
       if ((mode === "sequential" || mode === "random") && isPracticing) {
         event.preventDefault();
 
-        // 라운드 완료 상태에서 엔터 누르면 다음 라운드 시작
+        // 라운드 완료/일시정지 상태에서 엔터 처리
         if (isRoundComplete) {
-          startNextRound();
+          // 완전히 다 쳤으면 새 라운드, 아니면 재개
+          const displayedClean = displayedText.replace(/\s+/g, '');
+          const typedClean = typedWord.replace(/\s+/g, '');
+          if (typedClean.length >= displayedClean.length) {
+            incrementCompletedRounds(practiceSlot); // 완료 라운드 카운트 증가
+            startNextRound();
+          } else {
+            resumeRound();
+          }
           return;
         }
 
@@ -518,18 +616,15 @@ export default function TypingPractice() {
         const currentElapsedMs = currentWordStartTime ? Date.now() - currentWordStartTime : 0;
         const totalKeystrokes = accumulatedKeystrokes + currentWordKeystrokes;
         const totalElapsedMs = accumulatedElapsedMs + currentElapsedMs;
-        const elapsedSeconds = Math.round(totalElapsedMs / 1000);
 
-        // 최소 1초 이상 경과해야 계산 (비정상적인 값 방지)
-        if (totalElapsedMs >= 1000 && totalKeystrokes > 0) {
+        // 0.1초(100ms) 이상 경과하면 계산
+        if (totalElapsedMs >= 100 && totalKeystrokes > 0) {
           const totalElapsedMinutes = totalElapsedMs / 1000 / 60;
           const kpm = Math.min(3000, Math.round(totalKeystrokes / totalElapsedMinutes));
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
           const cpm = Math.min(3000, Math.round(charCount / totalElapsedMinutes));
-          setLastResult({ kpm, cpm, elapsedTime: elapsedSeconds });
-          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedSeconds }]);
-        } else if (totalElapsedMs > 0) {
-          setLastResult({ kpm: 0, cpm: 0, elapsedTime: elapsedSeconds });
+          setLastResult({ kpm, cpm, elapsedTime: totalElapsedMs });
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: totalElapsedMs }]);
         }
 
         // 누적 값 업데이트
@@ -545,14 +640,14 @@ export default function TypingPractice() {
       if (currentWordStartTime && currentWordKeystrokes > 0) {
         const elapsedMs = Date.now() - currentWordStartTime;
 
-        // 최소 1초 이상 경과해야 계산 (비정상적인 값 방지)
-        if (elapsedMs >= 1000) {
+        // 0.1초(100ms) 이상 경과하면 계산
+        if (elapsedMs >= 100) {
           const elapsedMinutes = elapsedMs / 1000 / 60;
           const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
           const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
-          setLastResult({ kpm, cpm, elapsedTime: 0 });
-          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: 0 }]);
+          setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs }]);
         }
       }
 
@@ -627,11 +722,15 @@ export default function TypingPractice() {
         // 매매치라 모드 초기화
         setBatchStartIndex(0);
         setCurrentBatchChars("");
+        // 연습 시작 시 현재 슬롯 저장
+        setPracticeSlot(selectedSlot);
         if (mode === "sequential" || mode === "random") {
           // 보교치기/랜덤 모드: 카운트다운 후 시작
           startCountdown(() => {
             setRoundStartTime(Date.now());
             startPractice(words);
+            // 타이핑 칸에 포커스
+            setTimeout(() => typingTextareaRef.current?.focus(), 50);
           });
         } else {
           startPractice(words);
@@ -759,19 +858,15 @@ export default function TypingPractice() {
       // 타수/자수 계산
       if (currentWordStartTime && currentWordKeystrokes > 0) {
         const elapsedMs = Date.now() - currentWordStartTime;
-        const elapsedSeconds = Math.round(elapsedMs / 1000);
 
-        // 최소 1초 이상 경과해야 계산 (비정상적인 값 방지)
-        if (elapsedMs >= 1000) {
+        // 0.1초(100ms) 이상 경과하면 계산
+        if (elapsedMs >= 100) {
           const elapsedMinutes = elapsedMs / 1000 / 60;
           const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
           const charCount = typedClean.length;
           const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
-          setLastResult({ kpm, cpm, elapsedTime: elapsedSeconds });
-          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedSeconds }]);
-        } else if (elapsedMs > 0) {
-          // 1초 미만이면 간단히 저장 (시간만)
-          setLastResult({ kpm: 0, cpm: 0, elapsedTime: elapsedSeconds });
+          setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs }]);
         }
       }
       resetCurrentWordTracking();
@@ -809,9 +904,9 @@ export default function TypingPractice() {
       if (currentWordStartTime) {
         const currentMs = Date.now() - currentWordStartTime;
         const totalMs = accumulatedElapsedMs + currentMs;
-        setDisplayElapsedTime(Math.round(totalMs / 1000));
+        setDisplayElapsedTime(totalMs);
       }
-    }, 100);
+    }, 10);
 
     return () => clearInterval(interval);
   }, [isPracticing, countdown, isRoundComplete, currentWordStartTime, accumulatedElapsedMs]);
@@ -934,6 +1029,46 @@ export default function TypingPractice() {
       avgTime: Math.round(totalTime / allResults.length)
     };
   };
+
+  // 윗칸에 표시된 글자 (랜덤 순서로 나온 글자들)
+  const displayedText = useMemo((): string => {
+    if (isBatchMode) {
+      return currentBatchChars;
+    }
+    return randomizedIndices.slice(0, currentDisplayIndex).map(index => sequentialText[index]).join('');
+  }, [isBatchMode, currentBatchChars, randomizedIndices, currentDisplayIndex, sequentialText]);
+
+  // 색상 마킹 (일시정지/완료 시에만) - 윗칸에 표시된 글자와 비교
+  const markedText = useMemo((): FullMarkedChar[] => {
+    if (mode !== "sequential" || !isRoundComplete || typedWord.length === 0) {
+      return [];
+    }
+    return getFullMarkedText(displayedText, typedWord);
+  }, [mode, isRoundComplete, displayedText, typedWord]);
+
+  // 채점 결과 (일시정지/완료 시에만)
+  const scoringResult = useMemo((): ScoringResult | null => {
+    if (mode !== "sequential" || !isRoundComplete || typedWord.length === 0) {
+      return null;
+    }
+    return analyzeScoring(displayedText, typedWord);
+  }, [mode, isRoundComplete, displayedText, typedWord]);
+
+  // 윗칸 (원문) 색상 마킹 (일시정지/완료 시에만)
+  const markedOriginalText = useMemo((): MarkedChar[] => {
+    if (mode !== "sequential" || !isRoundComplete || !scoringResult) {
+      return [];
+    }
+    return getMarkedText(displayedText, scoringResult);
+  }, [mode, isRoundComplete, displayedText, scoringResult]);
+
+  // 라운드가 진짜 완료인지 (모든 글자를 다 쳤는지) 확인
+  const isFullyComplete = useMemo((): boolean => {
+    if (!isRoundComplete) return false;
+    const displayedClean = displayedText.replace(/\s+/g, '');
+    const typedClean = typedWord.replace(/\s+/g, '');
+    return typedClean.length >= displayedClean.length;
+  }, [isRoundComplete, displayedText, typedWord]);
 
   return (
     <div className="p-4 w-full">
@@ -1353,11 +1488,28 @@ export default function TypingPractice() {
                 <div className="flex items-center space-x-4 text-sm">
                   {isRoundComplete ? (
                     <>
-                      <span className="text-green-600 font-bold">라운드 완료!</span>
+                      <span className={`font-bold ${isFullyComplete ? 'text-green-600' : 'text-yellow-600'}`}>
+                        {practiceSlot !== null ? `${slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} ` : ''}
+                        {isFullyComplete ? '라운드 완료' : '라운드 일시정지'}
+                      </span>
                       <span className="text-blue-600 font-semibold">타수: {lastResult.kpm}/분</span>
                       <span className="text-purple-600 font-semibold">자수: {lastResult.cpm}/분</span>
                       <span className="text-orange-600 font-semibold">시간: {formatTime(lastResult.elapsedTime)}</span>
-                      <span className="text-gray-500">(엔터를 눌러 다시 시작)</span>
+                      <span className="text-gray-500">
+                        {isFullyComplete ? '(엔터: 다음 라운드)' : '(엔터: 재개)'}
+                      </span>
+                      {isFullyComplete && (
+                        <>
+                          <span className="text-indigo-600 font-semibold">
+                            오늘: {todayCompletedRounds + 1}회 완료
+                          </span>
+                          {practiceSlot !== null && (
+                            <span className="text-teal-600 font-semibold">
+                              ({slotNames[practiceSlot] || `슬롯 ${practiceSlot}`}: {(slotCompletedRounds[practiceSlot] || 0) + 1}회)
+                            </span>
+                          )}
+                        </>
+                      )}
                     </>
                   ) : (
                     <>
@@ -1429,60 +1581,192 @@ export default function TypingPractice() {
 
           {showText && (mode === "sequential") && (
             <div className="flex-1 flex flex-col gap-4">
-              <div className={`flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 overflow-hidden ${(countdown !== null || isRoundComplete) ? 'flex flex-col items-center justify-center' : ''}`}>
+              <div className={`flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 overflow-hidden relative ${countdown !== null ? 'flex flex-col items-center justify-center' : ''}`}>
                 {countdown !== null ? (
                   <>
-                    {selectedSlot !== null && (
-                      <p className="text-xl font-semibold text-gray-600 mb-4">
-                        {slotNames[selectedSlot] || `슬롯 ${selectedSlot}`}
+                    {practiceSlot !== null && (
+                      <p className="text-xl font-semibold text-gray-600 mb-2">
+                        {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`}
                       </p>
                     )}
                     <p className="text-8xl font-bold text-blue-600 animate-pulse">
                       {countdown}
                     </p>
-                  </>
-                ) : isRoundComplete ? (
-                  <>
-                    <p className="text-4xl font-bold text-green-600 mb-4">
-                      라운드 완료!
+                    <p className="text-lg text-indigo-600 font-semibold mt-4">
+                      오늘: {todayCompletedRounds + 1}회
                     </p>
-                    <div className="text-xl space-y-2 text-center">
-                      <p className="text-blue-600 font-semibold">타수: {lastResult.kpm}/분</p>
-                      <p className="text-purple-600 font-semibold">자수: {lastResult.cpm}/분</p>
-                      <p className="text-orange-600 font-semibold">시간: {formatTime(lastResult.elapsedTime)}</p>
-                      {allResults.length > 1 && (
-                        <>
-                          <p className="text-gray-600 mt-4">평균 타수: {calculateAverage().avgKpm}/분</p>
-                          <p className="text-gray-600">평균 자수: {calculateAverage().avgCpm}/분</p>
-                        </>
-                      )}
-                    </div>
-                    <p className="text-gray-500 mt-6">(엔터를 눌러 다시 시작)</p>
                   </>
                 ) : (
-                  <p
-                    className="font-semibold whitespace-pre-wrap w-full"
-                    style={{ fontSize: `${displayFontSize}px`, lineHeight: 1.5 }}
-                  >
-                    {isBatchMode
-                      ? currentBatchChars
-                      : randomizedIndices.slice(0, currentDisplayIndex).map(index =>
-                          sequentialText[index]
-                        ).join('')}
-                  </p>
+                  <>
+                    {isRoundComplete && markedOriginalText.length > 0 ? (
+                      /* 일시정지/완료 시 원문 색상 표시 */
+                      <div
+                        className="font-semibold whitespace-pre-wrap w-full"
+                        style={{ fontSize: `${displayFontSize}px`, lineHeight: 1.5 }}
+                      >
+                        {markedOriginalText.map((m, idx) => (
+                          <span
+                            key={idx}
+                            className={`${
+                              m.state === 'deletion'
+                                ? 'text-red-600'
+                                : m.state === 'substitution'
+                                ? 'text-blue-600'
+                                : 'text-black'
+                            } ${hoveredOrigIdx === idx ? 'bg-yellow-300 rounded px-0.5' : ''}`}
+                          >
+                            {m.char}
+                            {m.state === 'substitution' && m.wrongChar && (
+                              <span className="text-blue-400">({m.wrongChar})</span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        className="font-semibold whitespace-pre-wrap w-full"
+                        style={{ fontSize: `${displayFontSize}px`, lineHeight: 1.5 }}
+                      >
+                        {(() => {
+                          const text = isBatchMode
+                            ? currentBatchChars
+                            : randomizedIndices.slice(0, currentDisplayIndex).map(index =>
+                                sequentialText[index]
+                              ).join('');
+
+                          // 재개 직후 하이라이트만 표시
+                          if (showResumeHighlight) {
+                            return text.split('').map((char, idx) => {
+                              const isCurrentPos = idx === resumePosition;
+                              const isTyped = idx < resumePosition;
+                              return (
+                                <span
+                                  key={idx}
+                                  className={
+                                    isCurrentPos
+                                      ? 'bg-yellow-300 rounded px-0.5'
+                                      : isTyped
+                                      ? 'text-gray-400'
+                                      : ''
+                                  }
+                                >
+                                  {char}
+                                </span>
+                              );
+                            });
+                          }
+
+                          return text;
+                        })()}
+                      </div>
+                    )}
+                    {isRoundComplete && (
+                      <div className="absolute inset-0 bg-gray-500 bg-opacity-30 pointer-events-none" />
+                    )}
+                  </>
                 )}
               </div>
-              <div className="flex-1 border-2 border-green-500 rounded bg-green-50 p-4">
-                <textarea
-                  className="w-full h-full p-4 border-2 border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  style={{ fontSize: `${inputFontSize}px`, lineHeight: 1.5, imeMode: 'active' } as React.CSSProperties}
-                  placeholder="여기에 타이핑하세요"
-                  value={typedWord}
-                  onChange={(e) => updateTypedWord(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  lang="ko"
-                />
+              <div className="flex-1 border-2 border-green-500 rounded bg-green-50 p-4 flex flex-col">
+                {/* 채점 결과 및 색깔 범례 (일시정지 시에만) */}
+                {isRoundComplete && scoringResult && (
+                  <div className="mb-2 p-2 bg-white rounded border text-sm">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      <span>전체: <span className="font-bold">{scoringResult.totalChars}</span></span>
+                      <span><span className="text-red-600 font-bold">■</span> 탈자: <span className="font-bold text-red-600">{scoringResult.deletions}</span></span>
+                      <span><span className="text-green-600 font-bold">■</span> 첨자: <span className="font-bold text-green-600">{scoringResult.insertions}</span></span>
+                      <span><span className="text-blue-600 font-bold">■</span> 오자: <span className="font-bold text-blue-600">{scoringResult.substitutions}</span></span>
+                      <span>정확도: <span className="font-bold text-purple-600">{scoringResult.accuracy}%</span></span>
+                    </div>
+                  </div>
+                )}
+                <div className="flex-1">
+                  {isRoundComplete && markedText.length > 0 ? (
+                    /* 일시정지/완료 시 색상 표시 */
+                    <div
+                      className="w-full h-full p-4 border-2 border-gray-300 rounded overflow-auto whitespace-pre-wrap break-all bg-white"
+                      style={{ fontSize: `${inputFontSize}px`, lineHeight: 1.5 }}
+                    >
+                      {markedText.map((m, idx) => (
+                        <span
+                          key={idx}
+                          className={`${
+                            m.state === 'deletion'
+                              ? 'text-red-600 cursor-pointer'
+                              : m.state === 'insertion'
+                              ? 'text-green-600 cursor-pointer'
+                              : m.state === 'substitution'
+                              ? 'text-blue-600 cursor-pointer'
+                              : 'text-black'
+                          }`}
+                          onMouseEnter={() => {
+                            if (m.state !== 'correct' && m.origIdx !== undefined) {
+                              setHoveredOrigIdx(m.origIdx);
+                            }
+                          }}
+                          onMouseLeave={() => setHoveredOrigIdx(null)}
+                        >
+                          {m.char}
+                          {m.state === 'substitution' && m.expectedChar && (
+                            <span className="text-blue-400">({m.expectedChar})</span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    /* 입력 중 textarea */
+                    <textarea
+                      ref={typingTextareaRef}
+                      className="w-full h-full p-4 border-2 border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                      style={{
+                        fontSize: `${inputFontSize}px`,
+                        lineHeight: 1.5,
+                        imeMode: 'active'
+                      } as React.CSSProperties}
+                      placeholder="여기에 타이핑하세요"
+                      value={typedWord}
+                      onChange={(e) => {
+                        updateTypedWord(e.target.value);
+                        if (showResumeHighlight) setShowResumeHighlight(false);
+                      }}
+                      onKeyDown={handleKeyDown}
+                      lang="ko"
+                    />
+                  )}
+                </div>
               </div>
+              {/* 라운드 완료/일시정지 시 별도 연습칸 */}
+              {isRoundComplete && (
+                <div className="border-2 border-orange-400 rounded bg-orange-50 p-4">
+                  <div className="text-sm text-orange-600 mb-2 font-medium">
+                    연습칸 (엔터: {isFullyComplete ? '다음 라운드' : '재개'})
+                  </div>
+                  <textarea
+                    className="w-full p-4 border-2 border-orange-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none bg-white"
+                    style={{
+                      fontSize: `${inputFontSize}px`,
+                      lineHeight: 1.5,
+                      minHeight: '120px',
+                      imeMode: 'active'
+                    } as React.CSSProperties}
+                    placeholder="여기서 바로 연습하세요"
+                    value={practiceText}
+                    onChange={(e) => setPracticeText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (isFullyComplete) {
+                          incrementCompletedRounds(practiceSlot);
+                          startNextRound();
+                        } else {
+                          resumeRound();
+                        }
+                      }
+                    }}
+                    lang="ko"
+                    autoFocus
+                  />
+                </div>
+              )}
             </div>
           )}
 
