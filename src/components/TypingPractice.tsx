@@ -155,6 +155,8 @@ export default function TypingPractice() {
   const [slotCompletedRounds, setSlotCompletedRounds] = useState<Record<number, number>>({});
   // 연습 시작 시 슬롯 저장 (도중에 다른 슬롯 눌러도 표시 안 바뀌게)
   const [practiceSlot, setPracticeSlot] = useState<number | null>(null);
+  // 카운트다운 중 표시할 방금 완료한 슬롯 (아직 increment 안 됨)
+  const [pendingIncrementSlot, setPendingIncrementSlot] = useState<number | null>(null);
 
   // 현재 재생 중인 영상 URL
   const videoSrc = videoPlaylist.length > 0 ? videoPlaylist[currentVideoIndex]?.url : null;
@@ -514,11 +516,58 @@ export default function TypingPractice() {
     countdownTimerRef.current = setTimeout(tick, 1000);
   };
 
+  // 마지막 10~1글자로 원본에서 가장 정확한 구간 찾기
+  const findBestMatchPosition = (typed: string, original: string): number => {
+    // 공백 제거
+    const typedNoSpace = typed.replace(/\s+/g, '');
+    const originalNoSpace = original.replace(/\s+/g, '');
+
+    if (typedNoSpace.length === 0) return 0;
+
+    // 10글자부터 1글자까지 검사하여 완전 일치 구간 찾기
+    for (let len = Math.min(10, typedNoSpace.length); len >= 1; len--) {
+      const lastChars = typedNoSpace.slice(-len);
+
+      // 원본에서 완전 일치하는 구간 찾기 (뒤에서부터 검색하여 가장 마지막 일치 위치 선택)
+      for (let i = originalNoSpace.length - len; i >= 0; i--) {
+        const window = originalNoSpace.slice(i, i + len);
+        if (window === lastChars) {
+          // 완전 일치 발견 - 해당 구간의 끝 위치 (다음 글자 위치) 반환
+          return i + len;
+        }
+      }
+    }
+
+    // 완전 일치가 없으면 가장 유사한 구간 찾기 (기존 로직)
+    let bestPos = 0;
+    let bestScore = 0;
+    const searchLen = Math.min(10, typedNoSpace.length);
+    const lastChars = typedNoSpace.slice(-searchLen);
+
+    for (let i = 0; i <= originalNoSpace.length - searchLen; i++) {
+      const window = originalNoSpace.slice(i, i + searchLen);
+      let score = 0;
+      for (let j = 0; j < searchLen; j++) {
+        if (window[j] === lastChars[j]) score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestPos = i + searchLen;
+      }
+    }
+
+    return bestPos;
+  };
+
   // 라운드 재개 (일시정지에서 이어서)
   const resumeRound = () => {
-    // 재개 위치 저장 및 하이라이트 표시
-    const typedLen = typedWord.replace(/\s+/g, '').length;
-    setResumePosition(typedLen);
+    // 마지막 10글자로 원본에서 가장 유사한 위치 찾기
+    const text = isBatchMode
+      ? currentBatchChars
+      : randomizedIndices.slice(0, currentDisplayIndex).map(index => sequentialText[index]).join('');
+
+    const bestPos = findBestMatchPosition(typedWord, text);
+    setResumePosition(bestPos);
     setShowResumeHighlight(true);
 
     setIsRoundComplete(false);
@@ -534,7 +583,12 @@ export default function TypingPractice() {
   };
 
   // 다음 라운드 시작 (카운트다운 포함)
-  const startNextRound = () => {
+  // completedSlot: 방금 완료한 슬롯 (카운트다운 끝난 후 increment)
+  const startNextRound = (completedSlot?: number | null) => {
+    // 현재 선택된 슬롯으로 업데이트 (슬롯 변경 후 다음 라운드 시작 시)
+    setPracticeSlot(selectedSlot);
+    // 카운트다운 중 표시할 방금 완료한 슬롯 설정
+    setPendingIncrementSlot(completedSlot ?? null);
     setIsRoundComplete(false);
     setAccumulatedKeystrokes(0);
     setAccumulatedElapsedMs(0);
@@ -549,6 +603,11 @@ export default function TypingPractice() {
     setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
     setAllResults([]);
     startCountdown(() => {
+      // 카운트다운 끝난 후 완료 횟수 증가
+      if (completedSlot !== undefined && completedSlot !== null) {
+        incrementCompletedRounds(completedSlot);
+      }
+      setPendingIncrementSlot(null); // 표시용 상태 초기화
       setRoundStartTime(Date.now());
       restartSequentialPractice();
       // 타이핑 칸에 포커스
@@ -604,8 +663,7 @@ export default function TypingPractice() {
           const displayedClean = displayedText.replace(/\s+/g, '');
           const typedClean = typedWord.replace(/\s+/g, '');
           if (typedClean.length >= displayedClean.length) {
-            incrementCompletedRounds(practiceSlot); // 완료 라운드 카운트 증가
-            startNextRound();
+            startNextRound(practiceSlot); // 카운트다운 후 완료 횟수 증가
           } else {
             resumeRound();
           }
@@ -1500,14 +1558,14 @@ export default function TypingPractice() {
                       </span>
                       {isFullyComplete && (
                         <>
-                          <span className="text-indigo-600 font-semibold">
-                            오늘: {todayCompletedRounds + 1}회 완료
-                          </span>
                           {practiceSlot !== null && (
                             <span className="text-teal-600 font-semibold">
-                              ({slotNames[practiceSlot] || `슬롯 ${practiceSlot}`}: {(slotCompletedRounds[practiceSlot] || 0) + 1}회)
+                              {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} {(slotCompletedRounds[practiceSlot] || 0) + 1}회 완료
                             </span>
                           )}
+                          <span className="text-indigo-600 font-semibold">
+                            오늘: {todayCompletedRounds + 1}회
+                          </span>
                         </>
                       )}
                     </>
@@ -1585,16 +1643,30 @@ export default function TypingPractice() {
                 {countdown !== null ? (
                   <>
                     {practiceSlot !== null && (
-                      <p className="text-xl font-semibold text-gray-600 mb-2">
+                      <p className="text-2xl font-bold text-gray-700 mb-4">
                         {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`}
                       </p>
                     )}
                     <p className="text-8xl font-bold text-blue-600 animate-pulse">
                       {countdown}
                     </p>
-                    <p className="text-lg text-indigo-600 font-semibold mt-4">
-                      오늘: {todayCompletedRounds + 1}회
-                    </p>
+                    <div className="mt-6 text-base text-gray-600">
+                      {(() => {
+                        // 방금 완료한 슬롯만 +1 (아직 increment 안 됨)
+                        const displayRounds = { ...slotCompletedRounds };
+                        if (pendingIncrementSlot !== null) {
+                          displayRounds[pendingIncrementSlot] = (displayRounds[pendingIncrementSlot] || 0) + 1;
+                        }
+                        return Object.entries(displayRounds)
+                          .filter(([, count]) => count > 0)
+                          .sort(([a], [b]) => Number(a) - Number(b))
+                          .map(([slot, count]) => (
+                            <span key={slot} className={`mr-4 ${Number(slot) === practiceSlot ? 'font-bold text-indigo-600' : ''}`}>
+                              {slotNames[Number(slot)] || `슬롯 ${slot}`}: {count}회
+                            </span>
+                          ));
+                      })()}
+                    </div>
                   </>
                 ) : (
                   <>
@@ -1634,11 +1706,18 @@ export default function TypingPractice() {
                                 sequentialText[index]
                               ).join('');
 
-                          // 재개 직후 하이라이트만 표시
+                          // 재개 직후 하이라이트만 표시 (마지막 10~1글자 유사도 기반)
                           if (showResumeHighlight) {
-                            return text.split('').map((char, idx) => {
-                              const isCurrentPos = idx === resumePosition;
-                              const isTyped = idx < resumePosition;
+                            const textChars = [...text];
+                            // resumePosition: 공백 제거된 원본에서의 재개 위치 (다음에 칠 글자)
+                            let nonSpaceCount = 0;
+                            return textChars.map((char, idx) => {
+                              const isSpace = /\s/.test(char);
+                              const isCurrentPos = !isSpace && nonSpaceCount === resumePosition;
+                              const isTyped = !isSpace && nonSpaceCount < resumePosition;
+                              if (!isSpace) {
+                                nonSpaceCount++;
+                              }
                               return (
                                 <span
                                   key={idx}
@@ -1755,8 +1834,7 @@ export default function TypingPractice() {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         if (isFullyComplete) {
-                          incrementCompletedRounds(practiceSlot);
-                          startNextRound();
+                          startNextRound(practiceSlot); // 카운트다운 후 완료 횟수 증가
                         } else {
                           resumeRound();
                         }
