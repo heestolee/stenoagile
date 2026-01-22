@@ -585,6 +585,8 @@ export default function TypingPractice() {
   // 다음 라운드 시작 (카운트다운 포함)
   // completedSlot: 방금 완료한 슬롯 (카운트다운 끝난 후 increment)
   const startNextRound = (completedSlot?: number | null) => {
+    // 현재 선택된 슬롯으로 업데이트 (슬롯 변경 후 다음 라운드 시작 시)
+    setPracticeSlot(selectedSlot);
     // 카운트다운 중 표시할 방금 완료한 슬롯 설정
     setPendingIncrementSlot(completedSlot ?? null);
     setIsRoundComplete(false);
