@@ -1679,13 +1679,15 @@ export default function TypingPractice() {
                         {markedOriginalText.map((m, idx) => (
                           <span
                             key={idx}
-                            className={`${
+                            className={`cursor-pointer ${
                               m.state === 'deletion'
                                 ? 'text-red-600'
                                 : m.state === 'substitution'
                                 ? 'text-blue-600'
                                 : 'text-black'
                             } ${hoveredOrigIdx === idx ? 'bg-yellow-300 rounded px-0.5' : ''}`}
+                            onMouseEnter={() => setHoveredOrigIdx(idx)}
+                            onMouseLeave={() => setHoveredOrigIdx(null)}
                           >
                             {m.char}
                             {m.state === 'substitution' && m.wrongChar && (
@@ -1768,17 +1770,17 @@ export default function TypingPractice() {
                       {markedText.map((m, idx) => (
                         <span
                           key={idx}
-                          className={`${
+                          className={`cursor-pointer ${
                             m.state === 'deletion'
-                              ? 'text-red-600 cursor-pointer'
+                              ? 'text-red-600'
                               : m.state === 'insertion'
-                              ? 'text-green-600 cursor-pointer'
+                              ? 'text-green-600'
                               : m.state === 'substitution'
-                              ? 'text-blue-600 cursor-pointer'
+                              ? 'text-blue-600'
                               : 'text-black'
-                          }`}
+                          } ${hoveredOrigIdx !== null && m.origIdx === hoveredOrigIdx ? 'bg-yellow-300 rounded px-0.5' : ''}`}
                           onMouseEnter={() => {
-                            if (m.state !== 'correct' && m.origIdx !== undefined) {
+                            if (m.origIdx !== undefined) {
                               setHoveredOrigIdx(m.origIdx);
                             }
                           }}
