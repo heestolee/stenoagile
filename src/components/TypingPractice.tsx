@@ -469,20 +469,33 @@ export default function TypingPractice() {
   // 라운드 완료 카운트 증가
   const incrementCompletedRounds = useCallback((slot: number | null) => {
     const today = new Date().toISOString().split('T')[0];
+
     setTodayCompletedRounds(prev => {
       const newCount = prev + 1;
-      // 슬롯별 카운트도 업데이트
-      setSlotCompletedRounds(prevSlots => {
-        const newSlotCounts = { ...prevSlots };
-        if (slot !== null) {
-          newSlotCounts[slot] = (newSlotCounts[slot] || 0) + 1;
-        }
-        localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: newCount, slotCounts: newSlotCounts }));
-        return newSlotCounts;
-      });
+      // localStorage는 useEffect에서 처리
       return newCount;
     });
+
+    if (slot !== null) {
+      setSlotCompletedRounds(prevSlots => {
+        const newSlotCounts = { ...prevSlots };
+        newSlotCounts[slot] = (newSlotCounts[slot] || 0) + 1;
+        return newSlotCounts;
+      });
+    }
   }, []);
+
+  // localStorage에 완료 횟수 저장 (상태 변경 시)
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    if (todayCompletedRounds > 0 || Object.keys(slotCompletedRounds).length > 0) {
+      localStorage.setItem('completedRounds', JSON.stringify({
+        date: today,
+        count: todayCompletedRounds,
+        slotCounts: slotCompletedRounds
+      }));
+    }
+  }, [todayCompletedRounds, slotCompletedRounds]);
 
   const clearAllTimeouts = () => {
     timeoutIds.current.forEach(clearTimeout);
@@ -817,6 +830,10 @@ export default function TypingPractice() {
   };
 
   const handleLoadPreset = (slot: number) => {
+    // 진행 중일 때는 슬롯 변경 불가 (라운드 완료 상태에서는 허용)
+    if ((isPracticing && !isRoundComplete) || countdown !== null) {
+      return;
+    }
     setSelectedSlot(slot);
     const saved = localStorage.getItem(`slot_${slot}`);
 
@@ -1556,17 +1573,10 @@ export default function TypingPractice() {
                       <span className="text-gray-500">
                         {isFullyComplete ? '(엔터: 다음 라운드)' : '(엔터: 재개)'}
                       </span>
-                      {isFullyComplete && (
-                        <>
-                          {practiceSlot !== null && (
-                            <span className="text-teal-600 font-semibold">
-                              {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} {(slotCompletedRounds[practiceSlot] || 0) + 1}회 완료
-                            </span>
-                          )}
-                          <span className="text-indigo-600 font-semibold">
-                            오늘: {todayCompletedRounds + 1}회
-                          </span>
-                        </>
+                      {isFullyComplete && practiceSlot !== null && (
+                        <span className="text-teal-600 font-semibold">
+                          {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} : {(slotCompletedRounds[practiceSlot] || 0) + 1}회 완료
+                        </span>
                       )}
                     </>
                   ) : (
@@ -1662,7 +1672,7 @@ export default function TypingPractice() {
                           .sort(([a], [b]) => Number(a) - Number(b))
                           .map(([slot, count]) => (
                             <span key={slot} className={`mr-4 ${Number(slot) === practiceSlot ? 'font-bold text-indigo-600' : ''}`}>
-                              {slotNames[Number(slot)] || `슬롯 ${slot}`}: {count}회
+                              {slotNames[Number(slot)] || `슬롯 ${slot}`} : {count}회
                             </span>
                           ));
                       })()}
