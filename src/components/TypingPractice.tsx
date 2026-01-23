@@ -1137,12 +1137,24 @@ export default function TypingPractice() {
     return getMarkedText(displayedText, scoringResult);
   }, [mode, isRoundComplete, displayedText, scoringResult]);
 
-  // 라운드가 진짜 완료인지 (모든 글자를 다 쳤는지) 확인
+  // 라운드가 진짜 완료인지 (마지막 10~1글자 일치 확인)
   const isFullyComplete = useMemo((): boolean => {
     if (!isRoundComplete) return false;
     const displayedClean = displayedText.replace(/\s+/g, '');
     const typedClean = typedWord.replace(/\s+/g, '');
-    return typedClean.length >= displayedClean.length;
+
+    // 최소 길이 체크 (원문의 50% 이상은 쳐야 함)
+    if (typedClean.length < displayedClean.length * 0.5) return false;
+
+    // 마지막 10~1글자 중 하나라도 일치하면 완료
+    for (let len = Math.min(10, displayedClean.length); len >= 1; len--) {
+      const originalEnd = displayedClean.slice(-len);
+      const typedEnd = typedClean.slice(-len);
+      if (originalEnd === typedEnd) {
+        return true;
+      }
+    }
+    return false;
   }, [isRoundComplete, displayedText, typedWord]);
 
   return (
