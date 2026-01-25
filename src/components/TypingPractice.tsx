@@ -158,6 +158,9 @@ export default function TypingPractice() {
   // 카운트다운 중 표시할 방금 완료한 슬롯 (아직 increment 안 됨)
   const [pendingIncrementSlot, setPendingIncrementSlot] = useState<number | null>(null);
 
+  // 드로어 열림/닫힘 상태
+  const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+
   // 현재 재생 중인 영상 URL
   const videoSrc = videoPlaylist.length > 0 ? videoPlaylist[currentVideoIndex]?.url : null;
 
@@ -596,6 +599,8 @@ export default function TypingPractice() {
   // 다음 라운드 시작 (카운트다운 포함)
   // completedSlot: 방금 완료한 슬롯 (카운트다운 끝난 후 increment)
   const startNextRound = (completedSlot?: number | null) => {
+    // 드로어 닫기
+    setIsDrawerOpen(false);
     // 현재 선택된 슬롯으로 업데이트 (슬롯 변경 후 다음 라운드 시작 시)
     setPracticeSlot(selectedSlot);
     // 카운트다운 중 표시할 방금 완료한 슬롯 설정
@@ -702,6 +707,7 @@ export default function TypingPractice() {
         resetCurrentWordTracking();
         // 첫 번째 엔터: 결과만 보여주고 대기 (라운드 완료 상태로 전환)
         setIsRoundComplete(true);
+        setIsDrawerOpen(true); // 드로어 열기
         return;
       }
 
@@ -793,6 +799,8 @@ export default function TypingPractice() {
         setCurrentBatchChars("");
         // 연습 시작 시 현재 슬롯 저장
         setPracticeSlot(selectedSlot);
+        // 드로어 닫기
+        setIsDrawerOpen(false);
         if (mode === "sequential" || mode === "random") {
           // 보교치기/랜덤 모드: 카운트다운 후 시작
           startCountdown(() => {
@@ -950,6 +958,7 @@ export default function TypingPractice() {
       if (nextBatchStart >= randomizedIndices.length) {
         // 모든 글자 완료 - 한 사이클 끝
         setIsRoundComplete(true);
+        setIsDrawerOpen(true); // 드로어 열기
       } else {
         // 다음 배치 준비
         setBatchStartIndex(nextBatchStart);
@@ -1159,73 +1168,80 @@ export default function TypingPractice() {
     <div className="p-4 w-full">
       <h1 className="text-2xl font-bold mb-4 text-center">StenoAgile</h1>
 
-      <div className={`flex ${mode === "sequential" ? "flex-row gap-4" : mode === "random" ? "flex-row gap-2" : "flex-col lg:flex-row gap-24"}`}>
-        <div className={mode === "random" ? "w-28 flex flex-col gap-1 flex-shrink-0" : mode === "sequential" ? "w-64 space-y-4" : "flex-1 space-y-4"}>
-          {mode !== "random" && (
-            <div className="space-y-2 mb-2">
-              <div className="flex flex-wrap gap-1">
-                {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
-                  <button
-                    key={num}
-                    className={`px-3 py-1 rounded text-sm ${
-                      selectedSlot === num
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                    onClick={() => handleLoadPreset(num)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      handleRenameSlot(num);
-                    }}
-                    title="우클릭하여 이름 변경"
-                  >
-                    {slotNames[num] || num}
-                  </button>
-                ))}
-              </div>
+      <div className="flex flex-row gap-0">
+        {/* 드로어 */}
+        <div className={`transition-all duration-300 overflow-hidden flex-shrink-0 ${isDrawerOpen ? "w-80" : "w-0"}`}>
+          <div className="w-80 space-y-4 pr-4">
+            {/* 모드 탭 (최상단) */}
+            <div className="flex gap-2">
               <button
-                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 w-full"
-                onClick={handleSaveToSlot}
+                className={`px-4 py-2 rounded ${
+                  mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
+                }`}
+                onClick={() => switchMode("words")}
               >
-                현재 문장 저장
+                단어
+              </button>
+              <button
+                className={`px-4 py-2 rounded ${
+                  mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
+                }`}
+                onClick={() => switchMode("sentences")}
+              >
+                문장
+              </button>
+              <button
+                className={`px-4 py-2 rounded ${
+                  mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
+                }`}
+                onClick={() => switchMode("random")}
+              >
+                듣고치라
+              </button>
+              <button
+                className={`px-4 py-2 rounded ${
+                  mode === "sequential" ? "bg-blue-500 text-white" : "bg-gray-300"
+                }`}
+                onClick={() => switchMode("sequential")}
+              >
+                보고치라
               </button>
             </div>
-          )}
-          <div className={mode === "random" ? "flex flex-wrap gap-1" : "flex gap-2"}>
-            <button
-              className={`${mode === "random" ? "px-2 py-1 text-xs" : "px-4 py-2"} rounded ${
-                mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
-              }`}
-              onClick={() => switchMode("words")}
-            >
-              단어
-            </button>
-            <button
-              className={`${mode === "random" ? "px-2 py-1 text-xs" : "px-4 py-2"} rounded ${
-                mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
-              }`}
-              onClick={() => switchMode("sentences")}
-            >
-              문장
-            </button>
-            <button
-              className={`${mode === "random" ? "px-2 py-1 text-xs" : "px-4 py-2"} rounded ${
-                mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
-              }`}
-              onClick={() => switchMode("random")}
-            >
-              듣고치라
-            </button>
-            <button
-              className={`${mode === "random" ? "px-2 py-1 text-xs" : "px-4 py-2"} rounded ${
-                mode === "sequential" ? "bg-blue-500 text-white" : "bg-gray-300"
-              }`}
-              onClick={() => switchMode("sequential")}
-            >
-              보고치라
-            </button>
-          </div>
-          {mode === "random" && (
+
+            {/* 슬롯 버튼 (words/sentences 모드) */}
+            {mode !== "random" && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-1">
+                  {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
+                    <button
+                      key={num}
+                      className={`px-3 py-1 rounded text-sm ${
+                        selectedSlot === num
+                          ? "bg-blue-500 text-white"
+                          : "bg-gray-200 hover:bg-gray-300"
+                      }`}
+                      onClick={() => handleLoadPreset(num)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        handleRenameSlot(num);
+                      }}
+                      title="우클릭하여 이름 변경"
+                    >
+                      {slotNames[num] || num}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 w-full"
+                  onClick={handleSaveToSlot}
+                >
+                  현재 문장 저장
+                </button>
+              </div>
+            )}
+
+            {/* random 모드 설정 */}
+            {mode === "random" && (
             <>
               <div className="flex items-center gap-1 mt-1">
                 <label className="text-xs">글자</label>
@@ -1330,20 +1346,33 @@ export default function TypingPractice() {
               onChange={handleTextareaChange}
             />
           )}
-          {mode !== "sequential" && mode !== "random" && (
-            <button
-              className={`px-4 py-2 rounded font-semibold transition ${
-                isPracticing
-                  ? "bg-gray-500 text-white hover:bg-gray-600"
-                  : "bg-blue-500 text-white hover:bg-blue-600"
-              }`}
-              onClick={handleStartOrStopPractice}
-            >
-              {isPracticing ? "연습 종료" : "연습 시작"}
-            </button>
-          )}
+            {/* 연습 시작/종료 버튼 */}
+            {mode !== "sequential" && mode !== "random" && (
+              <button
+                className={`px-4 py-2 rounded font-semibold transition ${
+                  isPracticing
+                    ? "bg-gray-500 text-white hover:bg-gray-600"
+                    : "bg-blue-500 text-white hover:bg-blue-600"
+                }`}
+                onClick={handleStartOrStopPractice}
+              >
+                {isPracticing ? "연습 종료" : "연습 시작"}
+              </button>
+            )}
+          </div>
         </div>
-        <div className={mode === "sequential" || mode === "random" ? "flex-1 flex flex-col gap-4" : "flex-1 space-y-4"}>
+
+        {/* 토글 버튼 */}
+        <button
+          onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+          className="w-6 h-full min-h-[400px] bg-gray-200 hover:bg-gray-300 flex items-center justify-center flex-shrink-0 rounded-r transition-colors"
+          title={isDrawerOpen ? "설정 패널 닫기" : "설정 패널 열기"}
+        >
+          <span className="text-gray-600">{isDrawerOpen ? "◀" : "▶"}</span>
+        </button>
+
+        {/* 메인 타이핑 영역 */}
+        <div className="flex-1 flex flex-col gap-4 pl-4">
           {mode !== "sequential" && mode !== "random" && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
