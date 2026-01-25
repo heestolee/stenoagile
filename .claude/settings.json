@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "npx tsc -b",
+        "description": "파일 수정 후 타입체크 (CI와 동일)"
+      }
+    ]
+  }
+}

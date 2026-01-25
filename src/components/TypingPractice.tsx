@@ -468,8 +468,6 @@ export default function TypingPractice() {
 
   // 라운드 완료 카운트 증가
   const incrementCompletedRounds = useCallback((slot: number | null) => {
-    const today = new Date().toISOString().split('T')[0];
-
     setTodayCompletedRounds(prev => {
       const newCount = prev + 1;
       // localStorage는 useEffect에서 처리
