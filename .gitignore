@@ -11,7 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Claude Code (settings.json만 공유)
 .claude
+!.claude/settings.json
 
 # Editor directories and files
 .vscode/*
