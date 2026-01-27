@@ -100,7 +100,7 @@ export default function TypingPractice() {
   const [showText, setShowText] = useState(true);
   const timeoutIds = useRef<number[]>([]);
   const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0, elapsedTime: 0 });
-  const [allResults, setAllResults] = useState<{ kpm: number, cpm: number, elapsedTime: number }[]>([]);
+  const [allResults, setAllResults] = useState<{ kpm: number, cpm: number, elapsedTime: number, chars: string }[]>([]);
   const sequentialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [slotNames, setSlotNames] = useState<{ [key: number]: string }>({});
@@ -133,6 +133,11 @@ export default function TypingPractice() {
   const [batchSize, setBatchSize] = useState(5); // 한번에 보여줄 글자 수
   const [batchStartIndex, setBatchStartIndex] = useState(0); // 현재 배치 시작 인덱스
   const [currentBatchChars, setCurrentBatchChars] = useState<string>(""); // 현재 배치에 표시된 글자들
+
+  // 복습 모드 상태 (시간 많이 걸린 5개 다시 연습)
+  const [isReviewMode, setIsReviewMode] = useState(false); // 복습 모드 여부
+  const [reviewBatches, setReviewBatches] = useState<string[]>([]); // 복습할 배치 목록
+  const [reviewIndex, setReviewIndex] = useState(0); // 현재 복습 중인 인덱스
 
   // YouTube 관련 상태
   const [videoSourceTab, setVideoSourceTab] = useState<'upload' | 'youtube'>('upload');
@@ -629,6 +634,10 @@ export default function TypingPractice() {
     // 매매치라 모드 초기화
     setBatchStartIndex(0);
     setCurrentBatchChars("");
+    // 복습 모드 초기화
+    setIsReviewMode(false);
+    setReviewBatches([]);
+    setReviewIndex(0);
     // 타수/자수 초기화
     setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
     setAllResults([]);
@@ -712,7 +721,7 @@ export default function TypingPractice() {
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
           const cpm = Math.min(3000, Math.round(charCount / totalElapsedMinutes));
           setLastResult({ kpm, cpm, elapsedTime: totalElapsedMs });
-          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: totalElapsedMs }]);
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: totalElapsedMs, chars: '' }]);
         }
 
         // 누적 값 업데이트
@@ -736,7 +745,7 @@ export default function TypingPractice() {
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
           const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
           setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
-          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs }]);
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
         }
       }
 
@@ -804,6 +813,10 @@ export default function TypingPractice() {
       // 매매치라 모드 초기화
       setBatchStartIndex(0);
       setCurrentBatchChars("");
+      // 복습 모드 초기화
+      setIsReviewMode(false);
+      setReviewBatches([]);
+      setReviewIndex(0);
       stopPractice();
       // 드로어 열기
       setIsDrawerOpen(true);
@@ -813,6 +826,10 @@ export default function TypingPractice() {
         // 매매치라 모드 초기화
         setBatchStartIndex(0);
         setCurrentBatchChars("");
+        // 복습 모드 초기화
+        setIsReviewMode(false);
+        setReviewBatches([]);
+        setReviewIndex(0);
         // 연습 시작 시 현재 슬롯 저장
         setPracticeSlot(selectedSlot);
         // 드로어 닫기
@@ -891,7 +908,19 @@ export default function TypingPractice() {
 
       // 매매치라 모드: batchSize만큼 한번에 표시
       if (isBatchMode) {
-        if (batchStartIndex < randomizedIndices.length && currentBatchChars === "") {
+        // 복습 모드일 경우
+        if (isReviewMode && currentBatchChars === "") {
+          const reviewChars = reviewBatches[reviewIndex];
+          if (reviewChars) {
+            setCurrentBatchChars(reviewChars);
+            if (isSoundEnabled) {
+              speakText(reviewChars, true);
+            }
+          }
+          return;
+        }
+
+        if (!isReviewMode && batchStartIndex < randomizedIndices.length && currentBatchChars === "") {
           // 현재 배치의 글자들 계산
           const endIndex = Math.min(batchStartIndex + batchSize, randomizedIndices.length);
           const batchChars = randomizedIndices
@@ -945,7 +974,7 @@ export default function TypingPractice() {
         speakText(sentences[currentSentenceIndex]);
       }
     }
-  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate, currentDisplayIndex, randomizedIndices, sequentialSpeed, isSoundEnabled, sequentialText, charsPerRead, isRoundComplete, isBatchMode, batchSize, batchStartIndex, currentBatchChars]);
+  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate, currentDisplayIndex, randomizedIndices, sequentialSpeed, isSoundEnabled, sequentialText, charsPerRead, isRoundComplete, isBatchMode, batchSize, batchStartIndex, currentBatchChars, isReviewMode, reviewBatches, reviewIndex]);
 
   // 매매치라 모드: 타이핑 확인 및 다음 배치로 이동
   useEffect(() => {
@@ -968,18 +997,61 @@ export default function TypingPractice() {
           const charCount = typedClean.length;
           const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
           setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
-          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs }]);
+          // 복습 모드가 아닐 때만 결과 저장 (복습 모드에서는 저장 안 함)
+          if (!isReviewMode) {
+            setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: currentBatchChars }]);
+          }
         }
       }
       resetCurrentWordTracking();
+
+      // 복습 모드일 경우
+      if (isReviewMode) {
+        const nextReviewIndex = reviewIndex + 1;
+        if (nextReviewIndex >= reviewBatches.length) {
+          // 복습 완료 - 진짜 라운드 완료
+          setIsReviewMode(false);
+          setReviewBatches([]);
+          setReviewIndex(0);
+          setIsRoundComplete(true);
+          setIsDrawerOpen(true);
+        } else {
+          // 다음 복습 배치
+          setReviewIndex(nextReviewIndex);
+          setCurrentBatchChars("");
+          updateTypedWord("");
+        }
+        return;
+      }
 
       // 정답! 다음 배치로 이동
       const nextBatchStart = batchStartIndex + batchSize;
 
       if (nextBatchStart >= randomizedIndices.length) {
-        // 모든 글자 완료 - 한 사이클 끝
-        setIsRoundComplete(true);
-        setIsDrawerOpen(true); // 드로어 열기
+        // 모든 글자 완료 - 시간 많이 걸린 5개 복습 시작
+        // allResults에서 시간 기준 내림차순 정렬 후 상위 5개 추출
+        // 참고: 방금 저장한 결과는 아직 allResults에 반영 안 됨, prev로 접근
+        setAllResults(prev => {
+          const sorted = [...prev].sort((a, b) => b.elapsedTime - a.elapsedTime);
+          const top5 = sorted.slice(0, 5).map(r => r.chars).filter(c => c.length > 0);
+          if (top5.length > 0) {
+            // setTimeout으로 상태 업데이트 분리 (React batching 이슈 방지)
+            setTimeout(() => {
+              setReviewBatches(top5);
+              setReviewIndex(0);
+              setIsReviewMode(true);
+              setCurrentBatchChars("");
+              updateTypedWord("");
+            }, 0);
+          } else {
+            // 결과가 없으면 바로 라운드 완료
+            setTimeout(() => {
+              setIsRoundComplete(true);
+              setIsDrawerOpen(true);
+            }, 0);
+          }
+          return prev;
+        });
       } else {
         // 다음 배치 준비
         setBatchStartIndex(nextBatchStart);
@@ -987,7 +1059,7 @@ export default function TypingPractice() {
         updateTypedWord("");
       }
     }
-  }, [typedWord, currentBatchChars, isPracticing, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isRoundComplete, currentWordStartTime, currentWordKeystrokes]);
+  }, [typedWord, currentBatchChars, isPracticing, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isRoundComplete, currentWordStartTime, currentWordKeystrokes, isReviewMode, reviewIndex, reviewBatches]);
 
   // 연습 종료 시 결과 초기화
   useEffect(() => {
@@ -1681,9 +1753,15 @@ export default function TypingPractice() {
                     <>
                       {isBatchMode && (
                         <>
-                          <span className="text-purple-600 font-semibold">
-                            진행: {Math.min(batchStartIndex + batchSize, randomizedIndices.length)}/{randomizedIndices.length}
-                          </span>
+                          {isReviewMode ? (
+                            <span className="text-red-600 font-semibold">
+                              복습: {reviewIndex + 1}/{reviewBatches.length}
+                            </span>
+                          ) : (
+                            <span className="text-purple-600 font-semibold">
+                              진행: {Math.min(batchStartIndex + batchSize, randomizedIndices.length)}/{randomizedIndices.length}
+                            </span>
+                          )}
                           {lastResult.kpm > 0 && (
                             <>
                               <span className="text-blue-600 font-semibold">타수: {lastResult.kpm}/분</span>
