@@ -151,8 +151,10 @@ export default function TypingPractice() {
 
   // 오늘 완료한 라운드 수
   const [todayCompletedRounds, setTodayCompletedRounds] = useState(0);
-  // 슬롯별 완료한 라운드 수
-  const [slotCompletedRounds, setSlotCompletedRounds] = useState<Record<number, number>>({});
+  // 슬롯별 완료한 라운드 수 (보교치라)
+  const [slotCompletedRoundsNormal, setSlotCompletedRoundsNormal] = useState<Record<number, number>>({});
+  // 슬롯별 완료한 라운드 수 (매매치라)
+  const [slotCompletedRoundsBatch, setSlotCompletedRoundsBatch] = useState<Record<number, number>>({});
   // 연습 시작 시 슬롯 저장 (도중에 다른 슬롯 눌러도 표시 안 바뀌게)
   const [practiceSlot, setPracticeSlot] = useState<number | null>(null);
   // 카운트다운 중 표시할 방금 완료한 슬롯 (아직 increment 안 됨)
@@ -457,20 +459,22 @@ export default function TypingPractice() {
       const parsed = JSON.parse(savedData);
       if (parsed.date === today) {
         setTodayCompletedRounds(parsed.count || 0);
-        setSlotCompletedRounds(parsed.slotCounts || {});
+        setSlotCompletedRoundsNormal(parsed.normalSlotCounts || parsed.slotCounts || {});
+        setSlotCompletedRoundsBatch(parsed.batchSlotCounts || {});
       } else {
         // 날짜가 바뀌면 초기화
-        localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, slotCounts: {} }));
+        localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, normalSlotCounts: {}, batchSlotCounts: {} }));
         setTodayCompletedRounds(0);
-        setSlotCompletedRounds({});
+        setSlotCompletedRoundsNormal({});
+        setSlotCompletedRoundsBatch({});
       }
     } else {
-      localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, slotCounts: {} }));
+      localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, normalSlotCounts: {}, batchSlotCounts: {} }));
     }
   }, []);
 
   // 라운드 완료 카운트 증가
-  const incrementCompletedRounds = useCallback((slot: number | null) => {
+  const incrementCompletedRounds = useCallback((slot: number | null, isBatch: boolean) => {
     setTodayCompletedRounds(prev => {
       const newCount = prev + 1;
       // localStorage는 useEffect에서 처리
@@ -478,25 +482,34 @@ export default function TypingPractice() {
     });
 
     if (slot !== null) {
-      setSlotCompletedRounds(prevSlots => {
-        const newSlotCounts = { ...prevSlots };
-        newSlotCounts[slot] = (newSlotCounts[slot] || 0) + 1;
-        return newSlotCounts;
-      });
+      if (isBatch) {
+        setSlotCompletedRoundsBatch(prevSlots => {
+          const newSlotCounts = { ...prevSlots };
+          newSlotCounts[slot] = (newSlotCounts[slot] || 0) + 1;
+          return newSlotCounts;
+        });
+      } else {
+        setSlotCompletedRoundsNormal(prevSlots => {
+          const newSlotCounts = { ...prevSlots };
+          newSlotCounts[slot] = (newSlotCounts[slot] || 0) + 1;
+          return newSlotCounts;
+        });
+      }
     }
   }, []);
 
   // localStorage에 완료 횟수 저장 (상태 변경 시)
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
-    if (todayCompletedRounds > 0 || Object.keys(slotCompletedRounds).length > 0) {
+    if (todayCompletedRounds > 0 || Object.keys(slotCompletedRoundsNormal).length > 0 || Object.keys(slotCompletedRoundsBatch).length > 0) {
       localStorage.setItem('completedRounds', JSON.stringify({
         date: today,
         count: todayCompletedRounds,
-        slotCounts: slotCompletedRounds
+        normalSlotCounts: slotCompletedRoundsNormal,
+        batchSlotCounts: slotCompletedRoundsBatch
       }));
     }
-  }, [todayCompletedRounds, slotCompletedRounds]);
+  }, [todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch]);
 
   const clearAllTimeouts = () => {
     timeoutIds.current.forEach(clearTimeout);
@@ -598,7 +611,8 @@ export default function TypingPractice() {
 
   // 다음 라운드 시작 (카운트다운 포함)
   // completedSlot: 방금 완료한 슬롯 (카운트다운 끝난 후 increment)
-  const startNextRound = (completedSlot?: number | null) => {
+  // wasBatchMode: 완료한 라운드가 매매치라 모드였는지
+  const startNextRound = (completedSlot?: number | null, wasBatchMode?: boolean) => {
     // 드로어 닫기
     setIsDrawerOpen(false);
     // 현재 선택된 슬롯으로 업데이트 (슬롯 변경 후 다음 라운드 시작 시)
@@ -621,7 +635,7 @@ export default function TypingPractice() {
     startCountdown(() => {
       // 카운트다운 끝난 후 완료 횟수 증가
       if (completedSlot !== undefined && completedSlot !== null) {
-        incrementCompletedRounds(completedSlot);
+        incrementCompletedRounds(completedSlot, wasBatchMode ?? false);
       }
       setPendingIncrementSlot(null); // 표시용 상태 초기화
       setRoundStartTime(Date.now());
@@ -679,7 +693,7 @@ export default function TypingPractice() {
           const displayedClean = displayedText.replace(/\s+/g, '');
           const typedClean = typedWord.replace(/\s+/g, '');
           if (typedClean.length >= displayedClean.length) {
-            startNextRound(practiceSlot); // 카운트다운 후 완료 횟수 증가
+            startNextRound(practiceSlot, isBatchMode); // 카운트다운 후 완료 횟수 증가
           } else {
             resumeRound();
           }
@@ -885,6 +899,11 @@ export default function TypingPractice() {
             .map(idx => sequentialText[idx])
             .join('');
           setCurrentBatchChars(batchChars);
+
+          // 소리 재생
+          if (isSoundEnabled && batchChars) {
+            speakText(batchChars, true);
+          }
         }
         return;
       }
@@ -1176,6 +1195,12 @@ export default function TypingPractice() {
   // 라운드가 진짜 완료인지 (마지막 10~1글자 일치 확인)
   const isFullyComplete = useMemo((): boolean => {
     if (!isRoundComplete) return false;
+
+    // 매매치라 모드에서 라운드 완료되면 항상 완료 처리 (모든 배치 완료 시에만 isRoundComplete가 true가 됨)
+    if (isBatchMode && batchStartIndex + batchSize >= randomizedIndices.length) {
+      return true;
+    }
+
     const displayedClean = displayedText.replace(/\s+/g, '');
     const typedClean = typedWord.replace(/\s+/g, '');
 
@@ -1191,7 +1216,7 @@ export default function TypingPractice() {
       }
     }
     return false;
-  }, [isRoundComplete, displayedText, typedWord]);
+  }, [isRoundComplete, displayedText, typedWord, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length]);
 
   // 라운드 완료 시에만 드로어 열기 (일시정지 시에는 닫힌 상태 유지)
   useEffect(() => {
@@ -1312,6 +1337,7 @@ export default function TypingPractice() {
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                       disabled={isBatchMode}
                     />
+                    <span className="text-xs text-gray-500">자/초</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">음성속도</label>
@@ -1329,6 +1355,7 @@ export default function TypingPractice() {
                       }}
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                    <span className="text-xs text-gray-500">배속</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">위 글자</label>
@@ -1346,6 +1373,7 @@ export default function TypingPractice() {
                       }}
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                    <span className="text-xs text-gray-500">px</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">아래글자</label>
@@ -1363,6 +1391,7 @@ export default function TypingPractice() {
                       }}
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                    <span className="text-xs text-gray-500">px</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">읽기단위</label>
@@ -1380,6 +1409,7 @@ export default function TypingPractice() {
                       }}
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                    <span className="text-xs text-gray-500">자</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">매매 치라</label>
@@ -1398,6 +1428,7 @@ export default function TypingPractice() {
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                       disabled={!isBatchMode}
                     />
+                    <span className="text-xs text-gray-500">자</span>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -1642,7 +1673,7 @@ export default function TypingPractice() {
                       </span>
                       {isFullyComplete && practiceSlot !== null && (
                         <span className="text-teal-600 font-semibold">
-                          {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} : {(slotCompletedRounds[practiceSlot] || 0) + 1}회 완료
+                          {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} ({isBatchMode ? '매매치라' : '보교치라'}) : {((isBatchMode ? slotCompletedRoundsBatch[practiceSlot] : slotCompletedRoundsNormal[practiceSlot]) || 0) + 1}회 완료
                         </span>
                       )}
                     </>
@@ -1729,18 +1760,26 @@ export default function TypingPractice() {
                     </p>
                     <div className="mt-6 text-base text-gray-600">
                       {(() => {
+                        // 보교치라 횟수
+                        const normalRounds = { ...slotCompletedRoundsNormal };
+                        // 매매치라 횟수
+                        const batchRounds = { ...slotCompletedRoundsBatch };
                         // 방금 완료한 슬롯만 +1 (아직 increment 안 됨)
-                        const displayRounds = { ...slotCompletedRounds };
                         if (pendingIncrementSlot !== null) {
-                          displayRounds[pendingIncrementSlot] = (displayRounds[pendingIncrementSlot] || 0) + 1;
+                          if (isBatchMode) {
+                            batchRounds[pendingIncrementSlot] = (batchRounds[pendingIncrementSlot] || 0) + 1;
+                          } else {
+                            normalRounds[pendingIncrementSlot] = (normalRounds[pendingIncrementSlot] || 0) + 1;
+                          }
                         }
-                        return Object.entries(displayRounds)
-                          .filter(([, count]) => count > 0)
-                          .sort(([a], [b]) => Number(a) - Number(b))
-                          .map(([slot, count]) => (
-                            <span key={slot} className={`mr-4 ${Number(slot) === practiceSlot ? 'font-bold text-indigo-600' : ''}`}>
-                              {slotNames[Number(slot)] || `슬롯 ${slot}`} : {count}회
-                            </span>
+                        const allSlots = new Set([...Object.keys(normalRounds), ...Object.keys(batchRounds)].map(Number));
+                        return Array.from(allSlots)
+                          .sort((a, b) => a - b)
+                          .filter(slot => (normalRounds[slot] || 0) > 0 || (batchRounds[slot] || 0) > 0)
+                          .map((slot) => (
+                            <div key={slot} className={`mr-4 ${slot === practiceSlot ? 'font-bold text-indigo-600' : ''}`}>
+                              {slotNames[slot] || `슬롯 ${slot}`} : 보교 {normalRounds[slot] || 0}회 / 매매 {batchRounds[slot] || 0}회
+                            </div>
                           ));
                       })()}
                     </div>
@@ -1913,7 +1952,7 @@ export default function TypingPractice() {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         if (isFullyComplete) {
-                          startNextRound(practiceSlot); // 카운트다운 후 완료 횟수 증가
+                          startNextRound(practiceSlot, isBatchMode); // 카운트다운 후 완료 횟수 증가
                         } else {
                           resumeRound();
                         }

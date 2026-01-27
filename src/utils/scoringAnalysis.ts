@@ -162,52 +162,6 @@ export function getMarkedText(original: string, result: ScoringResult): MarkedCh
   return marked;
 }
 
-// 입력 텍스트에 색상 마킹 (React용 데이터)
-export interface TypedMarkedChar {
-  char: string;
-  state: 'correct' | 'insertion' | 'substitution';
-  expectedChar?: string; // 오자일 경우 원래 있어야 할 글자
-}
-
-export function getMarkedTypedText(original: string, typed: string): TypedMarkedChar[] {
-  const origClean = original.replace(/\s+/g, '');
-  const typedClean = typed.replace(/\s+/g, '');
-
-  const dp = computeLCS(origClean, typedClean);
-  const diff = backtrackLCS(dp, origClean, typedClean);
-
-  const typedStates: ('correct' | 'insertion' | 'substitution')[] = Array(typedClean.length).fill('correct');
-  const expectedMap = new Map<number, string>();
-
-  // diff를 순회하면서 입력 텍스트의 상태 결정
-  for (let k = 0; k < diff.length; k++) {
-    const curr = diff[k];
-
-    if (curr.type === 'delete') {
-      // 다음이 insert면 substitute
-      if (k + 1 < diff.length && diff[k + 1].type === 'insert') {
-        const next = diff[k + 1];
-        typedStates[next.typedIdx!] = 'substitution';
-        expectedMap.set(next.typedIdx!, origClean[curr.origIdx!]);
-        k++;
-      }
-    } else if (curr.type === 'insert') {
-      typedStates[curr.typedIdx!] = 'insertion';
-    }
-  }
-
-  const marked: TypedMarkedChar[] = [];
-  for (let i = 0; i < typedClean.length; i++) {
-    marked.push({
-      char: typedClean[i],
-      state: typedStates[i],
-      expectedChar: expectedMap.get(i),
-    });
-  }
-
-  return marked;
-}
-
 // 탈자 포함 마킹 (아래칸에 탈자도 표시)
 export interface FullMarkedChar {
   char: string;
