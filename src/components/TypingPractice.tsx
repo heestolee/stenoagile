@@ -707,7 +707,7 @@ export default function TypingPractice() {
         resetCurrentWordTracking();
         // 첫 번째 엔터: 결과만 보여주고 대기 (라운드 완료 상태로 전환)
         setIsRoundComplete(true);
-        setIsDrawerOpen(true); // 드로어 열기
+        // 드로어는 라운드 완료 시에만 열기 (일시정지 시에는 닫힌 상태 유지)
         return;
       }
 
@@ -791,6 +791,8 @@ export default function TypingPractice() {
       setBatchStartIndex(0);
       setCurrentBatchChars("");
       stopPractice();
+      // 드로어 열기
+      setIsDrawerOpen(true);
     } else {
       const words = inputText.trim().split("/").filter(Boolean);
       if (words.length > 0) {
@@ -1191,6 +1193,13 @@ export default function TypingPractice() {
     return false;
   }, [isRoundComplete, displayedText, typedWord]);
 
+  // 라운드 완료 시에만 드로어 열기 (일시정지 시에는 닫힌 상태 유지)
+  useEffect(() => {
+    if (isFullyComplete) {
+      setIsDrawerOpen(true);
+    }
+  }, [isFullyComplete]);
+
   return (
     <div className="p-4 w-full">
       <h1 className="text-2xl font-bold mb-4 text-center">StenoAgile</h1>
@@ -1223,7 +1232,7 @@ export default function TypingPractice() {
                 }`}
                 onClick={() => switchMode("random")}
               >
-                듣고치라
+                듣고 치라
               </button>
               <button
                 className={`px-4 py-2 rounded ${
@@ -1231,18 +1240,28 @@ export default function TypingPractice() {
                 }`}
                 onClick={() => switchMode("sequential")}
               >
-                보고치라
+                보고 치라
               </button>
+              {mode === "sequential" && (
+                <button
+                  className={`px-4 py-2 rounded ${
+                    isBatchMode ? "bg-purple-500 text-white" : "bg-gray-300"
+                  }`}
+                  onClick={() => setIsBatchMode(!isBatchMode)}
+                >
+                  매매 치라
+                </button>
+              )}
             </div>
 
             {/* 슬롯 버튼 (words/sentences 모드) */}
             {mode !== "random" && (
               <div className="space-y-2">
-                <div className="flex flex-wrap gap-1">
+                <div className="grid grid-cols-5 gap-1">
                   {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
                     <button
                       key={num}
-                      className={`px-3 py-1 rounded text-sm ${
+                      className={`px-2 py-1 rounded text-sm ${
                         selectedSlot === num
                           ? "bg-blue-500 text-white"
                           : "bg-gray-200 hover:bg-gray-300"
@@ -1264,6 +1283,141 @@ export default function TypingPractice() {
                 >
                   현재 문장 저장
                 </button>
+              </div>
+            )}
+
+            {/* sequential 모드 설정 */}
+            {mode === "sequential" && (
+              <div className="space-y-2 border-t pt-2">
+                <div className="text-sm font-semibold text-gray-600">상세설정</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs whitespace-nowrap">표시속도</label>
+                    <input
+                      type="number"
+                      min={0.5}
+                      max={10}
+                      step={0.1}
+                      value={(1000 / sequentialSpeed).toFixed(1)}
+                      onChange={(e) => {
+                        const cps = parseFloat(e.target.value);
+                        if (!isNaN(cps) && cps > 0) {
+                          updateSequentialSpeed(Math.round(1000 / cps));
+                        }
+                      }}
+                      className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      disabled={isBatchMode}
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs whitespace-nowrap">음성속도</label>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={10}
+                      step={0.1}
+                      value={sequentialSpeechRate.toFixed(1)}
+                      onChange={(e) => {
+                        const rate = parseFloat(e.target.value);
+                        if (!isNaN(rate) && rate >= 0.1 && rate <= 10) {
+                          setSequentialSpeechRate(rate);
+                        }
+                      }}
+                      className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs whitespace-nowrap">위 글자</label>
+                    <input
+                      type="number"
+                      min={12}
+                      max={48}
+                      step={0.1}
+                      value={displayFontSize}
+                      onChange={(e) => {
+                        const size = parseFloat(e.target.value);
+                        if (!isNaN(size) && size >= 12 && size <= 48) {
+                          setDisplayFontSize(size);
+                        }
+                      }}
+                      className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs whitespace-nowrap">아래글자</label>
+                    <input
+                      type="number"
+                      min={12}
+                      max={48}
+                      step={0.1}
+                      value={inputFontSize}
+                      onChange={(e) => {
+                        const size = parseFloat(e.target.value);
+                        if (!isNaN(size) && size >= 12 && size <= 48) {
+                          setInputFontSize(size);
+                        }
+                      }}
+                      className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs whitespace-nowrap">읽기단위</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      step={1}
+                      value={charsPerRead}
+                      onChange={(e) => {
+                        const count = parseInt(e.target.value);
+                        if (!isNaN(count) && count >= 1 && count <= 50) {
+                          setCharsPerRead(count);
+                        }
+                      }}
+                      className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs whitespace-nowrap">매매 치라</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={batchSize}
+                      onChange={(e) => {
+                        const size = parseInt(e.target.value);
+                        if (!isNaN(size) && size >= 1 && size <= 100) {
+                          setBatchSize(size);
+                        }
+                      }}
+                      className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      disabled={!isBatchMode}
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className={`px-2 py-1 rounded text-xs font-medium transition ${
+                      showText
+                        ? "bg-blue-500 text-white hover:bg-blue-600"
+                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                    }`}
+                    onClick={() => setShowText(!showText)}
+                  >
+                    글자 {showText ? "ON" : "OFF"}
+                  </button>
+                  <button
+                    className={`px-2 py-1 rounded text-xs font-medium transition ${
+                      isSoundEnabled
+                        ? "bg-blue-500 text-white hover:bg-blue-600"
+                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                    }`}
+                    onClick={toggleSound}
+                  >
+                    소리 {isSoundEnabled ? "ON" : "OFF"}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1454,181 +1608,8 @@ export default function TypingPractice() {
 
           {(mode === "sequential") && (
             <div className="space-y-2">
-              {/* 상단 설정 드로어 */}
-              <div className={`transition-all duration-300 overflow-hidden ${isDrawerOpen ? "max-h-40" : "max-h-0"}`}>
-                <div className="space-y-2 pb-2">
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center space-x-2">
-                      <label className="font-medium whitespace-nowrap">표시 속도:</label>
-                      <input
-                        type="number"
-                        min={0.5}
-                        max={10}
-                        step={0.1}
-                        value={(1000 / sequentialSpeed).toFixed(1)}
-                        onChange={(e) => {
-                          const cps = parseFloat(e.target.value);
-                          if (!isNaN(cps) && cps > 0) {
-                            updateSequentialSpeed(Math.round(1000 / cps));
-                          }
-                        }}
-                        className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        disabled={isBatchMode}
-                      />
-                      <span className="text-sm text-gray-600">글자/초</span>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <label className="font-medium whitespace-nowrap">음성 속도:</label>
-                      <input
-                        type="number"
-                        min={0.1}
-                        max={10}
-                        step={0.1}
-                        value={sequentialSpeechRate.toFixed(1)}
-                        onChange={(e) => {
-                          const rate = parseFloat(e.target.value);
-                          if (!isNaN(rate) && rate >= 0.1 && rate <= 10) {
-                            setSequentialSpeechRate(rate);
-                          }
-                        }}
-                        className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-gray-600">배속</span>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <label className="font-medium whitespace-nowrap">위 글자:</label>
-                      <input
-                        type="number"
-                        min={12}
-                        max={48}
-                        step={0.1}
-                        value={displayFontSize}
-                        onChange={(e) => {
-                          const size = parseFloat(e.target.value);
-                          if (!isNaN(size) && size >= 12 && size <= 48) {
-                            setDisplayFontSize(size);
-                          }
-                        }}
-                        className="w-16 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-gray-600">px</span>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <label className="font-medium whitespace-nowrap">아래 글자:</label>
-                      <input
-                        type="number"
-                        min={12}
-                        max={48}
-                        step={0.1}
-                        value={inputFontSize}
-                        onChange={(e) => {
-                          const size = parseFloat(e.target.value);
-                          if (!isNaN(size) && size >= 12 && size <= 48) {
-                            setInputFontSize(size);
-                          }
-                        }}
-                        className="w-16 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-gray-600">px</span>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <label className="font-medium whitespace-nowrap">읽기 단위:</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={50}
-                        step={0.5}
-                        value={charsPerRead}
-                        onChange={(e) => {
-                          const count = parseInt(e.target.value);
-                          if (!isNaN(count) && count >= 1 && count <= 50) {
-                            setCharsPerRead(count);
-                          }
-                        }}
-                        className="w-16 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-gray-600">자</span>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <label className="font-medium whitespace-nowrap">글자 표시:</label>
-                      <button
-                        className={`px-4 py-1 rounded font-medium transition ${
-                          showText
-                            ? "bg-blue-500 text-white hover:bg-blue-600"
-                            : "bg-gray-300 text-gray-700 hover:bg-gray-400"
-                        }`}
-                        onClick={() => setShowText(!showText)}
-                      >
-                        {showText ? "ON" : "OFF"}
-                      </button>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <label className="font-medium whitespace-nowrap">소리:</label>
-                      <button
-                        className={`px-4 py-1 rounded font-medium transition ${
-                          isSoundEnabled
-                            ? "bg-blue-500 text-white hover:bg-blue-600"
-                            : "bg-gray-300 text-gray-700 hover:bg-gray-400"
-                        }`}
-                        onClick={toggleSound}
-                      >
-                        {isSoundEnabled ? "ON" : "OFF"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center space-x-2">
-                      <button
-                        className={`px-3 py-1 rounded font-medium transition ${
-                          isBatchMode
-                            ? "bg-purple-500 text-white hover:bg-purple-600"
-                            : "bg-gray-300 text-gray-700 hover:bg-gray-400"
-                        }`}
-                        onClick={() => setIsBatchMode(!isBatchMode)}
-                      >
-                        매매치라
-                      </button>
-                      {isBatchMode && (
-                        <>
-                          <input
-                            type="number"
-                            min={1}
-                            max={100}
-                            step={1}
-                            value={batchSize}
-                            onChange={(e) => {
-                              const size = parseInt(e.target.value);
-                              if (!isNaN(size) && size >= 1 && size <= 100) {
-                                setBatchSize(size);
-                              }
-                            }}
-                            className="w-16 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
-                          />
-                          <span className="text-sm text-gray-600">글자</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 항상 보이는 영역: 토글 버튼 + 연습 시작/종료 + 상태 표시 */}
+              {/* 연습 시작/종료 + 상태 표시 */}
               <div className="flex items-center gap-4">
-                <button
-                  onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-                  className="px-2 py-1 bg-gray-200 hover:bg-gray-300 rounded transition-colors text-sm"
-                  title={isDrawerOpen ? "설정 숨기기" : "설정 보이기"}
-                >
-                  {isDrawerOpen ? "▲ 설정" : "▼ 설정"}
-                </button>
-
                 <button
                   className={`px-4 py-2 rounded font-semibold transition ${
                     isPracticing || countdown !== null
