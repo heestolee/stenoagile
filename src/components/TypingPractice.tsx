@@ -1236,22 +1236,26 @@ export default function TypingPractice() {
               </button>
               <button
                 className={`px-4 py-2 rounded ${
-                  mode === "sequential" ? "bg-blue-500 text-white" : "bg-gray-300"
+                  mode === "sequential" && !isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
                 }`}
-                onClick={() => switchMode("sequential")}
+                onClick={() => {
+                  switchMode("sequential");
+                  setIsBatchMode(false);
+                }}
               >
                 보고 치라
               </button>
-              {mode === "sequential" && (
-                <button
-                  className={`px-4 py-2 rounded ${
-                    isBatchMode ? "bg-purple-500 text-white" : "bg-gray-300"
-                  }`}
-                  onClick={() => setIsBatchMode(!isBatchMode)}
-                >
-                  매매 치라
-                </button>
-              )}
+              <button
+                className={`px-4 py-2 rounded ${
+                  mode === "sequential" && isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
+                }`}
+                onClick={() => {
+                  switchMode("sequential");
+                  setIsBatchMode(true);
+                }}
+              >
+                매매 치라
+              </button>
             </div>
 
             {/* 슬롯 버튼 (words/sentences 모드) */}
