@@ -1176,6 +1176,12 @@ export default function TypingPractice() {
   // 라운드가 진짜 완료인지 (마지막 10~1글자 일치 확인)
   const isFullyComplete = useMemo((): boolean => {
     if (!isRoundComplete) return false;
+
+    // 매매치라 모드에서 라운드 완료되면 항상 완료 처리 (모든 배치 완료 시에만 isRoundComplete가 true가 됨)
+    if (isBatchMode && batchStartIndex + batchSize >= randomizedIndices.length) {
+      return true;
+    }
+
     const displayedClean = displayedText.replace(/\s+/g, '');
     const typedClean = typedWord.replace(/\s+/g, '');
 
@@ -1191,7 +1197,7 @@ export default function TypingPractice() {
       }
     }
     return false;
-  }, [isRoundComplete, displayedText, typedWord]);
+  }, [isRoundComplete, displayedText, typedWord, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length]);
 
   // 라운드 완료 시에만 드로어 열기 (일시정지 시에는 닫힌 상태 유지)
   useEffect(() => {
