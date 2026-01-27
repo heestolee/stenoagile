@@ -116,8 +116,9 @@ export function analyzeScoring(original: string, typed: string): ScoringResult {
   const insertions = insertionChars.length;
   const substitutions = substitutionChars.length;
 
-  // 정확도 계산 (맞은 글자 / 전체 글자)
-  const accuracy = totalChars > 0 ? (correct / totalChars) * 100 : 0;
+  // 정확도 계산 (맞은 글자 / (전체 글자 + 첨자))
+  // 첨자도 오류로 간주하여 정확도에 반영
+  const accuracy = (totalChars + insertions) > 0 ? (correct / (totalChars + insertions)) * 100 : 0;
 
   return {
     totalChars,
