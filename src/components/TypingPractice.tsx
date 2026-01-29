@@ -776,18 +776,6 @@ export default function TypingPractice() {
         }
       }
 
-      // 오답 로깅 (submitAnswer 전에 체크)
-      const trimmedInput = typedWord.replace(/\s+/g, '');
-      const target =
-        mode === "words"
-          ? shuffledWords[currentWordIndex]?.replace(/\s+/g, '') || ''
-          : mode === "sentences"
-          ? sentences[currentSentenceIndex]?.replace(/\s+/g, '') || ''
-          : randomLetters[currentLetterIndex] || '';
-      if (trimmedInput !== target) {
-        logMistake({ mode, word: target, typed: typedWord.trim() });
-      }
-
       submitAnswer(typedWord);
       resetCurrentWordTracking(); // 다음 단어를 위해 리셋
       return;
