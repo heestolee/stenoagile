@@ -4,7 +4,7 @@ import { useTypingStore } from "../store/useTypingStore";
 import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
 import { savedText1, savedText2, savedText5 } from "../constants";
 import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../utils/scoringAnalysis";
-import { logResult, logSession, logMistake } from "../utils/sheetLogger";
+import { logResult, logSession } from "../utils/sheetLogger";
 
 // IndexedDB 헬퍼 함수들
 const DB_NAME = 'StenoAgileDB';
