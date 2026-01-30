@@ -108,7 +108,7 @@ export default function TypingPractice() {
   const [displayFontSize, setDisplayFontSize] = useState(20); // 위쪽 표시 영역 글자 크기
   const [inputFontSize, setInputFontSize] = useState(19.5); // 아래쪽 타이핑 영역 글자 크기
   const [charsPerRead, setCharsPerRead] = useState(3); // 몇 글자씩 읽을지
-  const [sequentialSpeechRate, setSequentialSpeechRate] = useState(1); // 보교치기 음성 속도 (1배속)
+  const [sequentialSpeechRate, setSequentialSpeechRate] = useState(1); // 보고치라 음성 속도 (1배속)
   const [countdown, setCountdown] = useState<number | null>(null); // 카운트다운 상태
   const [, setRoundStartTime] = useState<number | null>(null); // 라운드 시작 시간
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -128,6 +128,7 @@ export default function TypingPractice() {
   const videoRef = useRef<HTMLVideoElement | null>(null); // 비디오 요소 참조
   const dropZoneRef = useRef<HTMLDivElement | null>(null); // 드롭 존 참조
   const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // 타이핑 칸 참조
+  const displayAreaRef = useRef<HTMLDivElement | null>(null); // 원문 표시 영역 참조
 
   // 매매치라 모드 상태
   const [isBatchMode, setIsBatchMode] = useState(false); // 매매치라 모드 활성화 여부
@@ -672,7 +673,7 @@ export default function TypingPractice() {
 
     // 텍스트를 통째로 재생 (Web Speech API가 자연스럽게 처리)
     const utterance = new SpeechSynthesisUtterance(text);
-    // 보교치기 모드일 때는 자연스럽게 들리도록 적절한 속도로 재생
+    // 보고치라 모드일 때는 자연스럽게 들리도록 적절한 속도로 재생
     utterance.rate = isSequential ? sequentialSpeechRate : speechRate;
     utterance.pitch = 1.2;
     utterance.volume = 1.0;
@@ -681,7 +682,7 @@ export default function TypingPractice() {
     }
 
     if (isSequential) {
-      // 보교치기 모드: 즉시 재생 (딜레이 없음)
+      // 보고치라 모드: 즉시 재생 (딜레이 없음)
       window.speechSynthesis.speak(utterance);
     } else {
       requestAnimationFrame(() => {
@@ -698,8 +699,8 @@ export default function TypingPractice() {
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (event.key === "Enter") {
-      // 보교치기/랜덤 모드에서는 다른 처리
-      if ((mode === "sequential" || mode === "random") && isPracticing) {
+      // 보고치라/긴글/랜덤 모드에서는 다른 처리
+      if ((mode === "sequential" || mode === "longtext" || mode === "random") && isPracticing) {
         event.preventDefault();
 
         // 라운드 완료/일시정지 상태에서 엔터 처리
@@ -797,8 +798,8 @@ export default function TypingPractice() {
 
     // 제외된 키가 아니면 타수 증가 (Backspace, Delete, Space 포함)
     if (!excludedKeys.includes(event.key)) {
-      // 보교치기/랜덤 모드에서 라운드 완료 상태일 때 타이핑 시작하면 자동으로 재개
-      if ((mode === "sequential" || mode === "random") && isRoundComplete) {
+      // 보고치라/긴글/랜덤 모드에서 라운드 완료 상태일 때 타이핑 시작하면 자동으로 재개
+      if ((mode === "sequential" || mode === "longtext" || mode === "random") && isRoundComplete) {
         setIsRoundComplete(false);
       }
 
@@ -878,8 +879,13 @@ export default function TypingPractice() {
         setPracticeSlot(selectedSlot);
         // 드로어 닫기
         setIsDrawerOpen(false);
-        if (mode === "sequential" || mode === "random") {
-          // 보교치기/랜덤 모드: 카운트다운 후 시작
+        if (mode === "longtext") {
+          // 긴 글 모드: 카운트다운 없이 바로 시작
+          setRoundStartTime(Date.now());
+          startPractice(words);
+          setTimeout(() => typingTextareaRef.current?.focus(), 50);
+        } else if (mode === "sequential" || mode === "random") {
+          // 보고치라/랜덤 모드: 카운트다운 후 시작
           startCountdown(() => {
             setRoundStartTime(Date.now());
             startPractice(words);
@@ -946,9 +952,12 @@ export default function TypingPractice() {
   useEffect(() => {
     if (!isPracticing) return;
 
-    if (mode === "sequential" || mode === "random") {
+    if (mode === "sequential" || mode === "longtext" || mode === "random") {
       // 라운드 완료 상태면 글자 표시 멈춤
       if (isRoundComplete) return;
+
+      // 카운트다운 중이면 글자 표시 안 함 (새 라운드 데이터 준비 전)
+      if (countdown !== null) return;
 
       // 매매치라 모드: batchSize만큼 한번에 표시
       if (isBatchMode) {
@@ -982,7 +991,7 @@ export default function TypingPractice() {
         return;
       }
 
-      // 보교치기/랜덤 모드: 랜덤 순서로 한 글자씩 표시
+      // 보고치라/랜덤 모드: 랜덤 순서로 한 글자씩 표시
       if (currentDisplayIndex < randomizedIndices.length) {
         sequentialTimerRef.current = setTimeout(() => {
           const nextCharIndex = randomizedIndices[currentDisplayIndex];
@@ -1019,7 +1028,7 @@ export default function TypingPractice() {
         speakText(sentences[currentSentenceIndex]);
       }
     }
-  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate, currentDisplayIndex, randomizedIndices, sequentialSpeed, isSoundEnabled, sequentialText, charsPerRead, isRoundComplete, isBatchMode, batchSize, batchStartIndex, currentBatchChars, isReviewMode, reviewBatches, reviewIndex]);
+  }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate, currentDisplayIndex, randomizedIndices, sequentialSpeed, isSoundEnabled, sequentialText, charsPerRead, isRoundComplete, isBatchMode, batchSize, batchStartIndex, currentBatchChars, isReviewMode, reviewBatches, reviewIndex, countdown]);
 
   // 매매치라 모드: 타이핑 확인 및 다음 배치로 이동
   useEffect(() => {
@@ -1132,6 +1141,14 @@ export default function TypingPractice() {
 
     return () => clearInterval(interval);
   }, [isPracticing, countdown, isRoundComplete, currentWordStartTime, accumulatedElapsedMs]);
+
+  // 원문 표시 영역 자동 스크롤 (새 글자가 나올 때 아래로)
+  useEffect(() => {
+    if (displayAreaRef.current && isPracticing && !isRoundComplete) {
+      displayAreaRef.current.scrollTop = displayAreaRef.current.scrollHeight;
+    }
+  }, [currentDisplayIndex, isPracticing, isRoundComplete]);
+
 
   // TEST 모드 동영상 단축키
   useEffect(() => {
@@ -1252,11 +1269,12 @@ export default function TypingPractice() {
     };
   };
 
-  // 윗칸에 표시된 글자 (랜덤 순서로 나온 글자들)
+  // 윗칸에 표시된 글자
   const displayedText = useMemo((): string => {
     if (isBatchMode) {
       return currentBatchChars;
     }
+    // 보고치라/긴글 모드: 인덱스 순서대로 표시 (긴글은 순차, 보고치라는 랜덤)
     return randomizedIndices.slice(0, currentDisplayIndex).map(index => sequentialText[index]).join('');
   }, [isBatchMode, currentBatchChars, randomizedIndices, currentDisplayIndex, sequentialText]);
 
@@ -1289,7 +1307,7 @@ export default function TypingPractice() {
 
   // 색상 마킹 (일시정지/완료 시에만) - 타이핑한 위치까지만 비교
   const markedText = useMemo((): FullMarkedChar[] => {
-    if (mode !== "sequential" || !isRoundComplete || typedWord.length === 0) {
+    if ((mode !== "sequential" && mode !== "longtext") || !isRoundComplete || typedWord.length === 0) {
       return [];
     }
     return getFullMarkedText(scoringOriginalText, typedWord);
@@ -1297,7 +1315,7 @@ export default function TypingPractice() {
 
   // 채점 결과 (일시정지/완료 시에만) - 타이핑한 위치까지만 비교
   const scoringResult = useMemo((): ScoringResult | null => {
-    if (mode !== "sequential" || !isRoundComplete || typedWord.length === 0) {
+    if ((mode !== "sequential" && mode !== "longtext") || !isRoundComplete || typedWord.length === 0) {
       return null;
     }
     return analyzeScoring(scoringOriginalText, typedWord);
@@ -1305,7 +1323,7 @@ export default function TypingPractice() {
 
   // 윗칸 (원문) 색상 마킹 (일시정지/완료 시에만) - 타이핑한 위치까지만 비교
   const markedOriginalText = useMemo((): MarkedChar[] => {
-    if (mode !== "sequential" || !isRoundComplete || !scoringResult) {
+    if ((mode !== "sequential" && mode !== "longtext") || !isRoundComplete || !scoringResult) {
       return [];
     }
     return getMarkedText(scoringOriginalText, scoringResult);
@@ -1346,62 +1364,70 @@ export default function TypingPractice() {
 
   return (
     <div className="p-4 w-full">
-      <h1 className="text-2xl font-bold mb-4 text-center">StenoAgile</h1>
+      <div className="flex items-center gap-4 mb-4">
+        <h1 className="text-2xl font-bold">StenoAgile</h1>
+        <div className="flex gap-2">
+          <button
+            className={`px-4 py-2 rounded ${
+              mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+            onClick={() => switchMode("words")}
+          >
+            단어
+          </button>
+          <button
+            className={`px-4 py-2 rounded ${
+              mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+            onClick={() => switchMode("sentences")}
+          >
+            문장
+          </button>
+          <button
+            className={`px-4 py-2 rounded ${
+              mode === "longtext" ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+            onClick={() => switchMode("longtext")}
+          >
+            긴 글
+          </button>
+          <button
+            className={`px-4 py-2 rounded ${
+              mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+            onClick={() => switchMode("random")}
+          >
+            듣고 치라
+          </button>
+          <button
+            className={`px-4 py-2 rounded ${
+              mode === "sequential" && !isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+            onClick={() => {
+              switchMode("sequential");
+              setIsBatchMode(false);
+            }}
+          >
+            보고 치라
+          </button>
+          <button
+            className={`px-4 py-2 rounded ${
+              mode === "sequential" && isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+            onClick={() => {
+              switchMode("sequential");
+              setIsBatchMode(true);
+            }}
+          >
+            매매 치라
+          </button>
+        </div>
+      </div>
 
       <div className="flex flex-row gap-0">
         {/* 드로어 */}
         <div className={`transition-all duration-300 overflow-hidden flex-shrink-0 ${isDrawerOpen ? "w-80" : "w-0"}`}>
           <div className="w-80 space-y-4 pr-4">
-            {/* 모드 탭 (최상단) */}
-            <div className="flex gap-2">
-              <button
-                className={`px-4 py-2 rounded ${
-                  mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
-                }`}
-                onClick={() => switchMode("words")}
-              >
-                단어
-              </button>
-              <button
-                className={`px-4 py-2 rounded ${
-                  mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
-                }`}
-                onClick={() => switchMode("sentences")}
-              >
-                문장
-              </button>
-              <button
-                className={`px-4 py-2 rounded ${
-                  mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
-                }`}
-                onClick={() => switchMode("random")}
-              >
-                듣고 치라
-              </button>
-              <button
-                className={`px-4 py-2 rounded ${
-                  mode === "sequential" && !isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
-                }`}
-                onClick={() => {
-                  switchMode("sequential");
-                  setIsBatchMode(false);
-                }}
-              >
-                보고 치라
-              </button>
-              <button
-                className={`px-4 py-2 rounded ${
-                  mode === "sequential" && isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
-                }`}
-                onClick={() => {
-                  switchMode("sequential");
-                  setIsBatchMode(true);
-                }}
-              >
-                매매 치라
-              </button>
-            </div>
-
             {/* 슬롯 버튼 (words/sentences 모드) */}
             {mode !== "random" && (
               <div className="space-y-2">
@@ -1434,8 +1460,8 @@ export default function TypingPractice() {
               </div>
             )}
 
-            {/* sequential 모드 설정 */}
-            {mode === "sequential" && (
+            {/* sequential/longtext 모드 설정 */}
+            {(mode === "sequential" || mode === "longtext") && (
               <div className="space-y-2 border-t pt-2">
                 <div className="text-sm font-semibold text-gray-600">상세설정</div>
                 <div className="grid grid-cols-2 gap-2">
@@ -1682,7 +1708,7 @@ export default function TypingPractice() {
             />
           )}
             {/* 연습 시작/종료 버튼 */}
-            {mode !== "sequential" && mode !== "random" && (
+            {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
               <button
                 className={`px-4 py-2 rounded font-semibold transition ${
                   isPracticing
@@ -1708,7 +1734,7 @@ export default function TypingPractice() {
 
         {/* 메인 타이핑 영역 */}
         <div className="flex-1 flex flex-col gap-4 pl-4">
-          {mode !== "sequential" && mode !== "random" && (
+          {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
@@ -1760,7 +1786,7 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {(mode === "sequential") && (
+          {(mode === "sequential" || mode === "longtext") && (
             <div className="space-y-2">
               {/* 연습 시작/종료 + 상태 표시 */}
               <div className="flex items-center gap-4">
@@ -1786,6 +1812,12 @@ export default function TypingPractice() {
                       </span>
                       <span className="text-blue-600 font-semibold">타수: {lastResult.kpm}/분</span>
                       <span className="text-purple-600 font-semibold">자수: {lastResult.cpm}/분</span>
+                      {allResults.length > 1 && (
+                        <>
+                          <span className="text-gray-600">평균 타수: {calculateAverage().avgKpm}/분</span>
+                          <span className="text-gray-600">평균 자수: {calculateAverage().avgCpm}/분</span>
+                        </>
+                      )}
                       <span className="text-orange-600 font-semibold">시간: {formatTime(lastResult.elapsedTime)}</span>
                       <span className="text-gray-500">
                         {isFullyComplete ? '(엔터: 다음 라운드)' : '(엔터: 재개)'}
@@ -1815,12 +1847,6 @@ export default function TypingPractice() {
                               <span className="text-green-600 font-semibold">자수: {lastResult.cpm}/분</span>
                             </>
                           )}
-                          {allResults.length > 1 && (
-                            <>
-                              <span className="text-gray-600">평균 타수: {calculateAverage().avgKpm}/분</span>
-                              <span className="text-gray-600">평균 자수: {calculateAverage().avgCpm}/분</span>
-                            </>
-                          )}
                         </>
                       )}
                       {!isBatchMode && allResults.length > 0 && (
@@ -1837,7 +1863,7 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {mode !== "sequential" && mode !== "random" && (
+          {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <label className="font-medium whitespace-nowrap">글자 표시:</label>
@@ -1870,9 +1896,12 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {showText && (mode === "sequential") && (
+          {showText && (mode === "sequential" || mode === "longtext") && (
             <div className="flex-1 flex flex-col gap-4">
-              <div className={`flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 overflow-hidden relative ${countdown !== null ? 'flex flex-col items-center justify-center' : ''}`}>
+              <div
+                ref={displayAreaRef}
+                className={`flex-1 p-4 border-2 border-blue-500 rounded bg-blue-50 relative ${countdown !== null ? 'flex flex-col items-center justify-center overflow-hidden' : 'overflow-y-auto'}`}
+              >
                 {countdown !== null ? (
                   <>
                     {practiceSlot !== null && (
@@ -1943,11 +1972,8 @@ export default function TypingPractice() {
                         style={{ fontSize: `${displayFontSize}px`, lineHeight: 1.5 }}
                       >
                         {(() => {
-                          const text = isBatchMode
-                            ? currentBatchChars
-                            : randomizedIndices.slice(0, currentDisplayIndex).map(index =>
-                                sequentialText[index]
-                              ).join('');
+                          // displayedText 사용 (이미 계산됨)
+                          const text = displayedText;
 
                           // 재개 직후 하이라이트만 표시 (마지막 10~1글자 유사도 기반)
                           if (showResumeHighlight) {
@@ -2435,7 +2461,7 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {showText && mode !== "sequential" && mode !== "random" && (
+          {showText && mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <div className="min-h-[200px] p-4 border rounded bg-gray-50">
               <p className="font-semibold whitespace-pre-wrap">
                 {mode === "words"
@@ -2447,7 +2473,7 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {mode !== "sequential" && mode !== "random" && (
+          {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <>
               <input
                 type="text"
