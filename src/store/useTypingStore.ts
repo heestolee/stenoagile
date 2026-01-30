@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import { STORAGE_KEY } from "../constants";
 import { cpsToRate } from "../utils/speechUtils";
 
-export type Mode = "words" | "sentences" | "random" | "sequential";
+export type Mode = "words" | "sentences" | "longtext" | "random" | "sequential";
 
 export interface IncorrectEntry {
   word: string;
@@ -33,7 +33,7 @@ interface TypingState {
   currentWordStartTime: number | null;
   currentWordKeystrokes: number;
 
-  // 순차 표시 모드 (보교치기)
+  // 순차 표시 모드 (보고치라)
   sequentialText: string;
   displayedCharIndices: Set<number>; // 이미 표시된 글자의 인덱스들
   sequentialSpeed: number; // ms per character
@@ -102,7 +102,7 @@ export const useTypingStore = create<TypingState>()(
       currentWordStartTime: null,
       currentWordKeystrokes: 0,
 
-      // 순차 표시 초기값 (보교치기)
+      // 순차 표시 초기값 (보고치라)
       sequentialText: "",
       displayedCharIndices: new Set<number>(),
       sequentialSpeed: 500, // 500ms per character (기본값)
@@ -145,9 +145,14 @@ export const useTypingStore = create<TypingState>()(
       restartSequentialPractice: () => {
         const state = get();
         // 기존 텍스트를 유지하면서 새로운 랜덤 순서로 재시작
-        const text = state.inputText.replace(/\s+/g, '');
+        // 긴 글 모드: 띄어쓰기 유지, 보고치라 모드: 띄어쓰기 제거
+        const text = state.mode === "longtext"
+          ? state.inputText
+          : state.inputText.replace(/\s+/g, '');
         const indices = Array.from({ length: text.length }, (_, i) => i);
-        const shuffledIndices = [...indices].sort(() => Math.random() - 0.5);
+        const shuffledIndices = state.mode === "longtext"
+          ? indices  // 긴 글 모드: 순서대로
+          : [...indices].sort(() => Math.random() - 0.5);  // 보고치라 모드: 랜덤
 
         set({
           sequentialText: text,
@@ -163,16 +168,20 @@ export const useTypingStore = create<TypingState>()(
       startPractice: (words) => {
         const state = get();
 
-        if (state.mode === "sequential") {
-          // 보교치기 모드: 글자 인덱스를 랜덤하게 섞음 (띄어쓰기 제거)
-          const text = state.inputText.replace(/\s+/g, '');
+        if (state.mode === "sequential" || state.mode === "longtext") {
+          // 보고치라: 띄어쓰기 제거, 긴 글: 띄어쓰기 유지
+          const text = state.mode === "longtext"
+            ? state.inputText
+            : state.inputText.replace(/\s+/g, '');
           const indices = Array.from({ length: text.length }, (_, i) => i);
-          const shuffledIndices = [...indices].sort(() => Math.random() - 0.5);
+          const finalIndices = state.mode === "longtext"
+            ? indices  // 긴 글 모드: 순서대로
+            : [...indices].sort(() => Math.random() - 0.5);  // 보고치라 모드: 랜덤
 
           set({
             sequentialText: text,
             displayedCharIndices: new Set<number>(),
-            randomizedIndices: shuffledIndices,
+            randomizedIndices: finalIndices,
             currentDisplayIndex: 0,
             isPracticing: true,
             correctCount: 0,
