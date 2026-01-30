@@ -699,6 +699,47 @@ export default function TypingPractice() {
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (event.key === "Enter") {
+      // 연습 시작 전 99+엔터: 원문이 있는 슬롯 중 랜덤으로 연습 시작
+      if (!isPracticing && typedWord.trim() === "99") {
+        event.preventDefault();
+        const slotsWithText: number[] = [];
+        for (let i = 1; i <= 20; i++) {
+          const savedText = localStorage.getItem(`slot_${i}`);
+          if (savedText && savedText.trim().length > 0) {
+            slotsWithText.push(i);
+          }
+        }
+        if (slotsWithText.length > 0) {
+          const randomSlot = slotsWithText[Math.floor(Math.random() * slotsWithText.length)];
+          const savedText = localStorage.getItem(`slot_${randomSlot}`);
+          if (savedText) {
+            updateInputText(savedText);
+            updateTypedWord("");
+            setSelectedSlot(randomSlot);
+            // 연습 시작
+            const words = savedText.split(/\s+/).filter((w) => w.length > 0);
+            if (words.length > 0) {
+              setPracticeSlot(randomSlot);
+              setIsDrawerOpen(false);
+              if (mode === "longtext") {
+                setRoundStartTime(Date.now());
+                startPractice(words);
+                setTimeout(() => typingTextareaRef.current?.focus(), 50);
+              } else if (mode === "sequential" || mode === "random") {
+                startCountdown(() => {
+                  setRoundStartTime(Date.now());
+                  startPractice(words);
+                  setTimeout(() => typingTextareaRef.current?.focus(), 50);
+                });
+              } else {
+                startPractice(words);
+              }
+            }
+          }
+        }
+        return;
+      }
+
       // 보고치라/긴글/랜덤 모드에서는 다른 처리
       if ((mode === "sequential" || mode === "longtext" || mode === "random") && isPracticing) {
         event.preventDefault();
