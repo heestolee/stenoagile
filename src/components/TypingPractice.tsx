@@ -2128,7 +2128,7 @@ export default function TypingPractice() {
                 <div className="border-2 border-orange-400 rounded bg-orange-50 p-4">
                   <div className="text-sm text-orange-600 mb-2 font-medium">
                     연습칸 (엔터: {isFullyComplete ? '다음 라운드' : '재개'})
-                    {isBatchMode && isFullyComplete && (
+                    {isBatchMode && (
                       <span className="ml-2 text-gray-500 font-normal">
                         | 슬롯번호+엔터: 해당 슬롯 | 99+엔터: 랜덤 슬롯
                       </span>
@@ -2181,6 +2181,36 @@ export default function TypingPractice() {
                           }
                           startNextRound(practiceSlot, isBatchMode); // 카운트다운 후 완료 횟수 증가
                         } else {
+                          // 일시정지 상태에서도 슬롯 이동 지원
+                          if (isBatchMode) {
+                            const slotNum = parseInt(practiceText.trim());
+                            // 99 입력 시 랜덤 슬롯
+                            if (slotNum === 99) {
+                              const slotsWithContent: number[] = [];
+                              for (let i = 1; i <= 20; i++) {
+                                if (localStorage.getItem(`slot_${i}`)) {
+                                  slotsWithContent.push(i);
+                                }
+                              }
+                              if (slotsWithContent.length > 0) {
+                                const randomSlot = slotsWithContent[Math.floor(Math.random() * slotsWithContent.length)];
+                                const savedText = localStorage.getItem(`slot_${randomSlot}`);
+                                if (savedText) {
+                                  updateInputText(savedText);
+                                }
+                                startNextRound(practiceSlot, isBatchMode, randomSlot);
+                                return;
+                              }
+                            }
+                            if (slotNum >= 1 && slotNum <= 20) {
+                              const savedText = localStorage.getItem(`slot_${slotNum}`);
+                              if (savedText) {
+                                updateInputText(savedText);
+                              }
+                              startNextRound(practiceSlot, isBatchMode, slotNum);
+                              return;
+                            }
+                          }
                           resumeRound();
                         }
                       }
