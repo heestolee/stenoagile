@@ -1953,7 +1953,7 @@ export default function TypingPractice() {
                     <p className="text-8xl font-bold text-blue-600 animate-pulse">
                       {countdown}
                     </p>
-                    <div className="mt-6 text-base text-gray-600">
+                    <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-3xl">
                       {(() => {
                         // 보교치라 횟수
                         const normalRounds = { ...slotCompletedRoundsNormal };
@@ -1972,8 +1972,19 @@ export default function TypingPractice() {
                           .sort((a, b) => a - b)
                           .filter(slot => (normalRounds[slot] || 0) > 0 || (batchRounds[slot] || 0) > 0)
                           .map((slot) => (
-                            <div key={slot} className={`mr-4 ${slot === practiceSlot ? 'font-bold text-indigo-600' : ''}`}>
-                              {slotNames[slot] || `슬롯 ${slot}`} : 보교 {normalRounds[slot] || 0}회 / 매매 {batchRounds[slot] || 0}회
+                            <div
+                              key={slot}
+                              className={`px-3 py-1.5 rounded-lg text-sm whitespace-nowrap shadow-sm ${
+                                slot === practiceSlot
+                                  ? 'bg-yellow-300 border-2 border-yellow-500 text-yellow-900 font-bold'
+                                  : 'bg-white border-2 border-gray-400 text-gray-700 font-medium'
+                              }`}
+                            >
+                              <span>{slotNames[slot] || `슬롯 ${slot}`}</span>
+                              <span className="mx-1.5 text-gray-400">|</span>
+                              <span className="text-green-700 font-bold">{normalRounds[slot] || 0}</span>
+                              <span className="text-gray-500">/</span>
+                              <span className="text-orange-600 font-bold">{batchRounds[slot] || 0}</span>
                             </div>
                           ));
                       })()}
