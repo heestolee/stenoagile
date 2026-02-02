@@ -105,6 +105,7 @@ export default function TypingPractice() {
   const sequentialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [slotNames, setSlotNames] = useState<{ [key: number]: string }>({});
+  const [favoriteSlots, setFavoriteSlots] = useState<Set<number>>(new Set());
   const [displayFontSize, setDisplayFontSize] = useState(20); // 위쪽 표시 영역 글자 크기
   const [inputFontSize, setInputFontSize] = useState(19.5); // 아래쪽 타이핑 영역 글자 크기
   const [charsPerRead, setCharsPerRead] = useState(3); // 몇 글자씩 읽을지
@@ -387,6 +388,17 @@ export default function TypingPractice() {
       }
     }
     setSlotNames(savedNames);
+
+    // 즐겨찾기 슬롯 불러오기
+    const savedFavorites = localStorage.getItem("favorite_slots");
+    if (savedFavorites) {
+      try {
+        const parsed = JSON.parse(savedFavorites);
+        setFavoriteSlots(new Set(parsed));
+      } catch {
+        // 파싱 실패 시 무시
+      }
+    }
 
     // 현재 inputText와 일치하는 슬롯 찾기
     for (let i = 1; i <= 20; i++) {
@@ -703,7 +715,9 @@ export default function TypingPractice() {
       if (!isPracticing && typedWord.trim() === "99") {
         event.preventDefault();
         const slotsWithText: number[] = [];
-        for (let i = 1; i <= 20; i++) {
+        // 즐겨찾기가 있으면 즐겨찾기 중에서만, 없으면 전체에서 선택
+        const targetSlots = favoriteSlots.size > 0 ? [...favoriteSlots] : Array.from({ length: 20 }, (_, i) => i + 1);
+        for (const i of targetSlots) {
           const savedText = localStorage.getItem(`slot_${i}`);
           // 현재 슬롯 제외
           if (savedText && savedText.trim().length > 0 && i !== selectedSlot) {
@@ -949,6 +963,19 @@ export default function TypingPractice() {
       localStorage.setItem(`slot_${slot}_name`, newName.trim());
       setSlotNames(prev => ({ ...prev, [slot]: newName.trim() }));
     }
+  };
+
+  const toggleFavoriteSlot = (slot: number) => {
+    setFavoriteSlots(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(slot)) {
+        newSet.delete(slot);
+      } else {
+        newSet.add(slot);
+      }
+      localStorage.setItem("favorite_slots", JSON.stringify([...newSet]));
+      return newSet;
+    });
   };
 
   const handleSaveToSlot = () => {
@@ -1477,18 +1504,27 @@ export default function TypingPractice() {
                   {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
                     <button
                       key={num}
-                      className={`px-2 py-1 rounded text-sm ${
+                      className={`px-2 py-1 rounded text-sm relative ${
                         selectedSlot === num
                           ? "bg-blue-500 text-white"
-                          : "bg-gray-200 hover:bg-gray-300"
+                          : favoriteSlots.has(num)
+                            ? "bg-yellow-100 hover:bg-yellow-200 ring-1 ring-yellow-400"
+                            : "bg-gray-200 hover:bg-gray-300"
                       }`}
-                      onClick={() => handleLoadPreset(num)}
+                      onClick={(e) => {
+                        if (e.shiftKey) {
+                          toggleFavoriteSlot(num);
+                        } else {
+                          handleLoadPreset(num);
+                        }
+                      }}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         handleRenameSlot(num);
                       }}
-                      title="우클릭하여 이름 변경"
+                      title="클릭: 불러오기 | Shift+클릭: 즐겨찾기 | 우클릭: 이름 변경"
                     >
+                      {favoriteSlots.has(num) && <span className="absolute -top-1 -right-1 text-xs">⭐</span>}
                       {slotNames[num] || num}
                     </button>
                   ))}
@@ -2160,69 +2196,38 @@ export default function TypingPractice() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        if (isFullyComplete) {
-                          // 매매치라 모드에서 숫자만 입력했으면 해당 슬롯으로 이동
-                          if (isBatchMode) {
-                            const slotNum = parseInt(practiceText.trim());
-                            // 99 입력 시 랜덤 슬롯 (현재 슬롯 제외)
-                            if (slotNum === 99) {
-                              const slotsWithContent: number[] = [];
-                              for (let i = 1; i <= 20; i++) {
-                                if (localStorage.getItem(`slot_${i}`) && i !== practiceSlot) {
-                                  slotsWithContent.push(i);
-                                }
-                              }
-                              if (slotsWithContent.length > 0) {
-                                const randomSlot = slotsWithContent[Math.floor(Math.random() * slotsWithContent.length)];
-                                const savedText = localStorage.getItem(`slot_${randomSlot}`);
-                                if (savedText) {
-                                  updateInputText(savedText);
-                                }
-                                startNextRound(practiceSlot, isBatchMode, randomSlot);
-                                return;
-                              }
-                            }
-                            if (slotNum >= 1 && slotNum <= 20) {
-                              const savedText = localStorage.getItem(`slot_${slotNum}`);
-                              if (savedText) {
-                                updateInputText(savedText);
-                              }
-                              startNextRound(practiceSlot, isBatchMode, slotNum);
-                              return;
+                        // 숫자 입력 시 슬롯 이동 (보고치라/매매치라 모두 지원)
+                        const slotNum = parseInt(practiceText.trim());
+                        if (slotNum === 99) {
+                          // 99 입력 시 랜덤 슬롯 (현재 슬롯 제외, 즐겨찾기 우선)
+                          const slotsWithContent: number[] = [];
+                          const targetSlots = favoriteSlots.size > 0 ? [...favoriteSlots] : Array.from({ length: 20 }, (_, i) => i + 1);
+                          for (const i of targetSlots) {
+                            if (localStorage.getItem(`slot_${i}`) && i !== practiceSlot) {
+                              slotsWithContent.push(i);
                             }
                           }
+                          if (slotsWithContent.length > 0) {
+                            const randomSlot = slotsWithContent[Math.floor(Math.random() * slotsWithContent.length)];
+                            const savedText = localStorage.getItem(`slot_${randomSlot}`);
+                            if (savedText) {
+                              updateInputText(savedText);
+                            }
+                            startNextRound(practiceSlot, isBatchMode, randomSlot);
+                            return;
+                          }
+                        }
+                        if (slotNum >= 1 && slotNum <= 20) {
+                          const savedText = localStorage.getItem(`slot_${slotNum}`);
+                          if (savedText) {
+                            updateInputText(savedText);
+                          }
+                          startNextRound(practiceSlot, isBatchMode, slotNum);
+                          return;
+                        }
+                        if (isFullyComplete) {
                           startNextRound(practiceSlot, isBatchMode); // 카운트다운 후 완료 횟수 증가
                         } else {
-                          // 일시정지 상태에서도 슬롯 이동 지원
-                          if (isBatchMode) {
-                            const slotNum = parseInt(practiceText.trim());
-                            // 99 입력 시 랜덤 슬롯 (현재 슬롯 제외)
-                            if (slotNum === 99) {
-                              const slotsWithContent: number[] = [];
-                              for (let i = 1; i <= 20; i++) {
-                                if (localStorage.getItem(`slot_${i}`) && i !== practiceSlot) {
-                                  slotsWithContent.push(i);
-                                }
-                              }
-                              if (slotsWithContent.length > 0) {
-                                const randomSlot = slotsWithContent[Math.floor(Math.random() * slotsWithContent.length)];
-                                const savedText = localStorage.getItem(`slot_${randomSlot}`);
-                                if (savedText) {
-                                  updateInputText(savedText);
-                                }
-                                startNextRound(practiceSlot, isBatchMode, randomSlot);
-                                return;
-                              }
-                            }
-                            if (slotNum >= 1 && slotNum <= 20) {
-                              const savedText = localStorage.getItem(`slot_${slotNum}`);
-                              if (savedText) {
-                                updateInputText(savedText);
-                              }
-                              startNextRound(practiceSlot, isBatchMode, slotNum);
-                              return;
-                            }
-                          }
                           resumeRound();
                         }
                       }
