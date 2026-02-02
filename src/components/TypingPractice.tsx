@@ -705,7 +705,8 @@ export default function TypingPractice() {
         const slotsWithText: number[] = [];
         for (let i = 1; i <= 20; i++) {
           const savedText = localStorage.getItem(`slot_${i}`);
-          if (savedText && savedText.trim().length > 0) {
+          // 현재 슬롯 제외
+          if (savedText && savedText.trim().length > 0 && i !== selectedSlot) {
             slotsWithText.push(i);
           }
         }
@@ -2163,11 +2164,11 @@ export default function TypingPractice() {
                           // 매매치라 모드에서 숫자만 입력했으면 해당 슬롯으로 이동
                           if (isBatchMode) {
                             const slotNum = parseInt(practiceText.trim());
-                            // 99 입력 시 랜덤 슬롯
+                            // 99 입력 시 랜덤 슬롯 (현재 슬롯 제외)
                             if (slotNum === 99) {
                               const slotsWithContent: number[] = [];
                               for (let i = 1; i <= 20; i++) {
-                                if (localStorage.getItem(`slot_${i}`)) {
+                                if (localStorage.getItem(`slot_${i}`) && i !== practiceSlot) {
                                   slotsWithContent.push(i);
                                 }
                               }
@@ -2195,11 +2196,11 @@ export default function TypingPractice() {
                           // 일시정지 상태에서도 슬롯 이동 지원
                           if (isBatchMode) {
                             const slotNum = parseInt(practiceText.trim());
-                            // 99 입력 시 랜덤 슬롯
+                            // 99 입력 시 랜덤 슬롯 (현재 슬롯 제외)
                             if (slotNum === 99) {
                               const slotsWithContent: number[] = [];
                               for (let i = 1; i <= 20; i++) {
-                                if (localStorage.getItem(`slot_${i}`)) {
+                                if (localStorage.getItem(`slot_${i}`) && i !== practiceSlot) {
                                   slotsWithContent.push(i);
                                 }
                               }
