@@ -2202,8 +2202,10 @@ export default function TypingPractice() {
                           // 99 입력 시 랜덤 슬롯 (현재 슬롯 제외, 즐겨찾기 우선)
                           const slotsWithContent: number[] = [];
                           const targetSlots = favoriteSlots.size > 0 ? [...favoriteSlots] : Array.from({ length: 20 }, (_, i) => i + 1);
+                          // practiceSlot이 null이면 selectedSlot 사용
+                          const currentSlot = practiceSlot ?? selectedSlot;
                           for (const i of targetSlots) {
-                            if (localStorage.getItem(`slot_${i}`) && i !== practiceSlot) {
+                            if (localStorage.getItem(`slot_${i}`) && i !== currentSlot) {
                               slotsWithContent.push(i);
                             }
                           }
@@ -2232,7 +2234,6 @@ export default function TypingPractice() {
                         }
                       }
                     }}
-                    lang="ko"
                     autoFocus
                   />
                 </div>
