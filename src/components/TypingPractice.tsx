@@ -1134,25 +1134,27 @@ export default function TypingPractice() {
     const targetClean = currentBatchChars.replace(/\s+/g, '');
 
     if (typedClean.endsWith(targetClean) && targetClean.length > 0) {
-      // 타수/자수 계산
-      if (currentWordStartTime && currentWordKeystrokes > 0) {
-        const elapsedMs = Date.now() - currentWordStartTime;
+      // 타수/자수 계산 (일시정지 누적값 포함)
+      const currentElapsedMs = currentWordStartTime ? Date.now() - currentWordStartTime : 0;
+      const totalKeystrokes = accumulatedKeystrokes + currentWordKeystrokes;
+      const totalElapsedMs = accumulatedElapsedMs + currentElapsedMs;
 
-        // 0.1초(100ms) 이상 경과하면 계산
-        if (elapsedMs >= 100) {
-          const elapsedMinutes = elapsedMs / 1000 / 60;
-          const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
-          const charCount = typedClean.length;
-          const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
-          setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
-          // 복습 모드가 아닐 때만 결과 저장 (복습 모드에서는 저장 안 함)
-          if (!isReviewMode) {
-            setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: currentBatchChars }]);
-            // Google Sheets 로깅
-            logResult({ mode, kpm, cpm, elapsedTime: elapsedMs, chars: currentBatchChars });
-          }
+      if (totalElapsedMs >= 100 && totalKeystrokes > 0) {
+        const totalElapsedMinutes = totalElapsedMs / 1000 / 60;
+        const kpm = Math.min(3000, Math.round(totalKeystrokes / totalElapsedMinutes));
+        const charCount = typedClean.length;
+        const cpm = Math.min(3000, Math.round(charCount / totalElapsedMinutes));
+        setLastResult({ kpm, cpm, elapsedTime: totalElapsedMs });
+        // 복습 모드가 아닐 때만 결과 저장 (복습 모드에서는 저장 안 함)
+        if (!isReviewMode) {
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: totalElapsedMs, chars: currentBatchChars }]);
+          // Google Sheets 로깅
+          logResult({ mode, kpm, cpm, elapsedTime: totalElapsedMs, chars: currentBatchChars });
         }
       }
+      // 누적값 초기화
+      setAccumulatedKeystrokes(0);
+      setAccumulatedElapsedMs(0);
       resetCurrentWordTracking();
 
       // 복습 모드일 경우
@@ -1210,7 +1212,7 @@ export default function TypingPractice() {
         updateTypedWord("");
       }
     }
-  }, [typedWord, currentBatchChars, isPracticing, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isRoundComplete, currentWordStartTime, currentWordKeystrokes, isReviewMode, reviewIndex, reviewBatches]);
+  }, [typedWord, currentBatchChars, isPracticing, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isRoundComplete, currentWordStartTime, currentWordKeystrokes, accumulatedKeystrokes, accumulatedElapsedMs, isReviewMode, reviewIndex, reviewBatches]);
 
   // 연습 종료 시 결과 초기화
   useEffect(() => {
