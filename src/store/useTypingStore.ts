@@ -105,7 +105,7 @@ export const useTypingStore = create<TypingState>()(
       // 순차 표시 초기값 (보고치라)
       sequentialText: "",
       displayedCharIndices: new Set<number>(),
-      sequentialSpeed: 500, // 500ms per character (기본값)
+      sequentialSpeed: 333, // 333ms per character (180자/분 기본값)
       randomizedIndices: [],
       currentDisplayIndex: 0,
 
