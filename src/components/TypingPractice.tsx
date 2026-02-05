@@ -141,6 +141,7 @@ export default function TypingPractice() {
   const [isReviewMode, setIsReviewMode] = useState(false); // 복습 모드 여부
   const [reviewBatches, setReviewBatches] = useState<string[]>([]); // 복습할 배치 목록
   const [reviewIndex, setReviewIndex] = useState(0); // 현재 복습 중인 인덱스
+  const [isBatchReviewDone, setIsBatchReviewDone] = useState(false); // 복습까지 완전히 끝났는지
 
   // YouTube 관련 상태
   const [videoSourceTab, setVideoSourceTab] = useState<'upload' | 'youtube'>('upload');
@@ -657,6 +658,7 @@ export default function TypingPractice() {
     setIsReviewMode(false);
     setReviewBatches([]);
     setReviewIndex(0);
+    setIsBatchReviewDone(false);
     // 타수/자수 초기화
     setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
     setAllResults([]);
@@ -761,30 +763,51 @@ export default function TypingPractice() {
 
         // 라운드 완료/일시정지 상태에서 엔터 처리
         if (isRoundComplete) {
-          // 매매치라 모드에서 숫자만 입력했으면 해당 슬롯으로 이동
-          if (isBatchMode && isFullyComplete) {
-            const slotNum = parseInt(typedWord.trim());
-            if (slotNum >= 1 && slotNum <= 20) {
-              // 해당 슬롯으로 이동
-              const savedText = localStorage.getItem(`slot_${slotNum}`);
-              if (savedText) {
-                updateInputText(savedText);
+          // 매매치라 모드: 복습 5/5 완료 전에는 무조건 재개
+          if (isBatchMode) {
+            if (isBatchReviewDone) {
+              const slotNum = parseInt(typedWord.trim());
+              if (slotNum >= 1 && slotNum <= 20) {
+                const savedText = localStorage.getItem(`slot_${slotNum}`);
+                if (savedText) {
+                  updateInputText(savedText);
+                }
+                setSelectedSlot(slotNum);
+                startNextRound(practiceSlot, true);
+                return;
               }
-              setSelectedSlot(slotNum);
               startNextRound(practiceSlot, true);
-              return;
+            } else {
+              resumeRound();
             }
-            // 숫자 아니면 같은 슬롯 반복
-            startNextRound(practiceSlot, true);
             return;
           }
-          // 완전히 다 쳤으면 새 라운드, 아니면 재개
-          const displayedClean = displayedText.replace(/\s+/g, '');
-          const typedClean = typedWord.replace(/\s+/g, '');
-          if (typedClean.length >= displayedClean.length) {
-            startNextRound(practiceSlot, isBatchMode); // 카운트다운 후 완료 횟수 증가
-          } else {
-            resumeRound();
+          // 보고치라 모드
+          if (mode === "sequential") {
+            if (isFullyComplete) {
+              startNextRound(practiceSlot, false);
+            } else {
+              resumeRound();
+            }
+            return;
+          }
+          // 긴글 모드
+          if (mode === "longtext") {
+            if (isFullyComplete) {
+              startNextRound(practiceSlot, false);
+            } else {
+              resumeRound();
+            }
+            return;
+          }
+          // 랜덤 모드
+          if (mode === "random") {
+            if (isFullyComplete) {
+              startNextRound(practiceSlot, false);
+            } else {
+              resumeRound();
+            }
+            return;
           }
           return;
         }
@@ -901,6 +924,7 @@ export default function TypingPractice() {
       setIsReviewMode(false);
       setReviewBatches([]);
       setReviewIndex(0);
+      setIsBatchReviewDone(false);
       // Google Sheets 세션 로깅
       if (allResults.length > 0) {
         const totalKpm = allResults.reduce((sum, r) => sum + r.kpm, 0);
@@ -931,6 +955,7 @@ export default function TypingPractice() {
         setIsReviewMode(false);
         setReviewBatches([]);
         setReviewIndex(0);
+        setIsBatchReviewDone(false);
         // 연습 시작 시 현재 슬롯 저장
         setPracticeSlot(selectedSlot);
         // 드로어 닫기
@@ -1138,6 +1163,7 @@ export default function TypingPractice() {
           setIsReviewMode(false);
           setReviewBatches([]);
           setReviewIndex(0);
+          setIsBatchReviewDone(true);
           setIsRoundComplete(true);
           setIsDrawerOpen(true);
         } else {
@@ -1402,11 +1428,9 @@ export default function TypingPractice() {
   const isFullyComplete = useMemo((): boolean => {
     if (!isRoundComplete) return false;
 
-    // 매매치라 모드: 진행률 100% + 복습 5개 완료일 때만 다음 라운드
+    // 매매치라 모드: 복습까지 완전히 끝났을 때만 다음 라운드
     if (isBatchMode) {
-      const progressComplete = batchStartIndex + batchSize >= randomizedIndices.length;
-      const reviewComplete = !isReviewMode && reviewBatches.length === 0;
-      return progressComplete && reviewComplete;
+      return isBatchReviewDone;
     }
 
     const displayedClean = displayedText.replace(/\s+/g, '');
@@ -1424,7 +1448,7 @@ export default function TypingPractice() {
       }
     }
     return false;
-  }, [isRoundComplete, displayedText, typedWord, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isReviewMode, reviewBatches.length]);
+  }, [isRoundComplete, displayedText, typedWord, isBatchMode, isBatchReviewDone]);
 
   // 라운드 완료 시에만 드로어 열기 (일시정지 시에는 닫힌 상태 유지)
   useEffect(() => {
@@ -2229,7 +2253,10 @@ export default function TypingPractice() {
                           startNextRound(practiceSlot, isBatchMode, slotNum);
                           return;
                         }
-                        if (isFullyComplete) {
+                        // 매매치라 모드: 복습 5/5 완료 전에는 무조건 재개
+                        if (isBatchMode && !isBatchReviewDone) {
+                          resumeRound();
+                        } else if (isFullyComplete) {
                           startNextRound(practiceSlot, isBatchMode); // 카운트다운 후 완료 횟수 증가
                         } else {
                           resumeRound();
