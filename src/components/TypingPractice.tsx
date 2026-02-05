@@ -1402,9 +1402,11 @@ export default function TypingPractice() {
   const isFullyComplete = useMemo((): boolean => {
     if (!isRoundComplete) return false;
 
-    // 매매치라 모드에서 라운드 완료되면 항상 완료 처리 (모든 배치 완료 시에만 isRoundComplete가 true가 됨)
-    if (isBatchMode && batchStartIndex + batchSize >= randomizedIndices.length) {
-      return true;
+    // 매매치라 모드: 진행률 100% + 복습 5개 완료일 때만 다음 라운드
+    if (isBatchMode) {
+      const progressComplete = batchStartIndex + batchSize >= randomizedIndices.length;
+      const reviewComplete = !isReviewMode && reviewBatches.length === 0;
+      return progressComplete && reviewComplete;
     }
 
     const displayedClean = displayedText.replace(/\s+/g, '');
@@ -1422,7 +1424,7 @@ export default function TypingPractice() {
       }
     }
     return false;
-  }, [isRoundComplete, displayedText, typedWord, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length]);
+  }, [isRoundComplete, displayedText, typedWord, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isReviewMode, reviewBatches.length]);
 
   // 라운드 완료 시에만 드로어 열기 (일시정지 시에는 닫힌 상태 유지)
   useEffect(() => {
