@@ -1575,20 +1575,20 @@ export default function TypingPractice() {
                     <label className="text-xs whitespace-nowrap">표시속도</label>
                     <input
                       type="number"
-                      min={0.5}
-                      max={10}
-                      step={0.1}
-                      value={(1000 / sequentialSpeed).toFixed(1)}
+                      min={30}
+                      max={600}
+                      step={10}
+                      value={Math.round(60000 / sequentialSpeed)}
                       onChange={(e) => {
-                        const cps = parseFloat(e.target.value);
-                        if (!isNaN(cps) && cps > 0) {
-                          updateSequentialSpeed(Math.round(1000 / cps));
+                        const cpm = parseFloat(e.target.value);
+                        if (!isNaN(cpm) && cpm > 0) {
+                          updateSequentialSpeed(Math.round(60000 / cpm));
                         }
                       }}
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                       disabled={isBatchMode}
                     />
-                    <span className="text-xs text-gray-500">자/초</span>
+                    <span className="text-xs text-gray-500">자/분</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">음성속도</label>
