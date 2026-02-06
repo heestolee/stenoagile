@@ -945,6 +945,8 @@ export default function TypingPractice() {
       stopPractice();
       // 드로어 열기
       setIsDrawerOpen(true);
+      // 타이핑칸에 포커스
+      setTimeout(() => typingTextareaRef.current?.focus(), 50);
     } else {
       const words = inputText.trim().split("/").filter(Boolean);
       if (words.length > 0) {
@@ -1353,6 +1355,21 @@ export default function TypingPractice() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [mode, videoVolume, videoPlaybackRate, videoLoop, skipSeconds, abRepeat, videoPlaylist.length, currentVideoIndex, playlistLoop]);
 
+  // ESC 키로 연습 시작/종료
+  const handleStartOrStopRef = useRef(handleStartOrStopPractice);
+  handleStartOrStopRef.current = handleStartOrStopPractice;
+
+  useEffect(() => {
+    const handleEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleStartOrStopRef.current();
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, []);
+
   // 평균 계산
   const calculateAverage = () => {
     if (allResults.length === 0) return { avgKpm: 0, avgCpm: 0, avgTime: 0 };
@@ -1501,6 +1518,16 @@ export default function TypingPractice() {
               mode === "sequential" && !isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
+              if (isBatchMode) {
+                stopPractice();
+                setBatchStartIndex(0);
+                setCurrentBatchChars("");
+                setIsReviewMode(false);
+                setReviewBatches([]);
+                setReviewIndex(0);
+                setIsBatchReviewDone(false);
+                setIsRoundComplete(false);
+              }
               switchMode("sequential");
               setIsBatchMode(false);
             }}
@@ -1512,6 +1539,10 @@ export default function TypingPractice() {
               mode === "sequential" && isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
+              if (!isBatchMode) {
+                stopPractice();
+                setIsRoundComplete(false);
+              }
               switchMode("sequential");
               setIsBatchMode(true);
             }}
@@ -1955,11 +1986,10 @@ export default function TypingPractice() {
                           )}
                         </>
                       )}
-                      {!isBatchMode && allResults.length > 0 && (
-                        <>
-                          <span className="text-gray-600">평균 타수: {calculateAverage().avgKpm}/분</span>
-                          <span className="text-gray-600">평균 자수: {calculateAverage().avgCpm}/분</span>
-                        </>
+                      {!isBatchMode && (
+                        <span className="text-purple-600 font-semibold">
+                          진행: {currentDisplayIndex}/{randomizedIndices.length}
+                        </span>
                       )}
                       <span className="text-orange-600 font-semibold">시간: {formatTime(displayElapsedTime)}</span>
                     </>
