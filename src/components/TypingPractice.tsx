@@ -493,6 +493,23 @@ export default function TypingPractice() {
     }
   }, []);
 
+  // 저장된 상세설정 복원
+  useEffect(() => {
+    const saved = localStorage.getItem('detailSettings');
+    if (saved) {
+      try {
+        const settings = JSON.parse(saved);
+        if (settings.displayFontSize !== undefined) setDisplayFontSize(settings.displayFontSize);
+        if (settings.inputFontSize !== undefined) setInputFontSize(settings.inputFontSize);
+        if (settings.charsPerRead !== undefined) setCharsPerRead(settings.charsPerRead);
+        if (settings.sequentialSpeechRate !== undefined) setSequentialSpeechRate(settings.sequentialSpeechRate);
+        if (settings.batchSize !== undefined) setBatchSize(settings.batchSize);
+      } catch (e) {
+        // 파싱 실패 시 기본값 유지
+      }
+    }
+  }, []);
+
   // 라운드 완료 카운트 증가
   const incrementCompletedRounds = useCallback((slot: number | null, isBatch: boolean) => {
     setTodayCompletedRounds(prev => {
@@ -1012,6 +1029,18 @@ export default function TypingPractice() {
     }
     localStorage.setItem(`slot_${selectedSlot}`, inputText);
     alert(`슬롯 ${selectedSlot}에 저장되었습니다`);
+  };
+
+  const handleSaveDetailSettings = () => {
+    const settings = {
+      displayFontSize,
+      inputFontSize,
+      charsPerRead,
+      sequentialSpeechRate,
+      batchSize,
+    };
+    localStorage.setItem('detailSettings', JSON.stringify(settings));
+    alert('상세설정이 기본값으로 저장되었습니다');
   };
 
   const handleLoadPreset = (slot: number) => {
@@ -1600,7 +1629,15 @@ export default function TypingPractice() {
             {/* sequential/longtext 모드 설정 */}
             {(mode === "sequential" || mode === "longtext") && (
               <div className="space-y-2 border-t pt-2">
-                <div className="text-sm font-semibold text-gray-600">상세설정</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-semibold text-gray-600">상세설정</div>
+                  <button
+                    className="px-2 py-0.5 rounded text-xs font-medium transition bg-gray-500 text-white hover:bg-gray-600"
+                    onClick={handleSaveDetailSettings}
+                  >
+                    기본값 저장
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">표시속도</label>
