@@ -725,6 +725,28 @@ export default function TypingPractice() {
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) =>
     updateInputText(event.target.value);
 
+  const handleTextareaDrop = (event: React.DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+      if (text.includes("\uFFFD")) {
+        const fallbackReader = new FileReader();
+        fallbackReader.onload = (e2) => {
+          const text2 = e2.target?.result as string;
+          if (text2) updateInputText(text2);
+        };
+        fallbackReader.readAsText(file, "EUC-KR");
+      } else {
+        updateInputText(text);
+      }
+    };
+    reader.readAsText(file, "UTF-8");
+  };
+
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) =>
     updateTypedWord(event.target.value);
 
@@ -979,12 +1001,7 @@ export default function TypingPractice() {
         setPracticeSlot(selectedSlot);
         // 드로어 닫기
         setIsDrawerOpen(false);
-        if (mode === "longtext") {
-          // 긴 글 모드: 카운트다운 없이 바로 시작
-          setRoundStartTime(Date.now());
-          startPractice(words);
-          setTimeout(() => typingTextareaRef.current?.focus(), 50);
-        } else if (mode === "sequential" || mode === "random") {
+        if (mode === "longtext" || mode === "sequential" || mode === "random") {
           // 보고치라/랜덤 모드: 카운트다운 후 시작
           startCountdown(() => {
             setRoundStartTime(Date.now());
@@ -1876,9 +1893,11 @@ export default function TypingPractice() {
             <textarea
               className="w-full p-2 border rounded"
               rows={25}
-              placeholder="연습할 단어들을 입력하세요 (/로 구분)"
+              placeholder="텍스트 파일을 드래그하여 넣을 수도 있습니다"
               value={inputText}
               onChange={handleTextareaChange}
+              onDrop={handleTextareaDrop}
+              onDragOver={(e) => e.preventDefault()}
             />
           )}
             {/* 연습 시작/종료 버튼 */}
@@ -2085,6 +2104,7 @@ export default function TypingPractice() {
                     <p className="text-8xl font-bold text-blue-600 animate-pulse">
                       {countdown}
                     </p>
+                    {mode !== "longtext" && (
                     <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-3xl">
                       {(() => {
                         // 보교치라 횟수
@@ -2121,6 +2141,7 @@ export default function TypingPractice() {
                           ));
                       })()}
                     </div>
+                    )}
                   </>
                 ) : (
                   <>
