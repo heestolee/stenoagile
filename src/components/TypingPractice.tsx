@@ -1508,7 +1508,7 @@ export default function TypingPractice() {
   return (
     <div className="p-4 w-full">
       <div className="flex items-center gap-4 mb-4">
-        <h1 className="text-2xl font-bold">StenoAgile</h1>
+        <h1 className="text-2xl font-bold">Stenosaurus</h1>
         <div className="flex gap-2">
           <button
             className={`px-4 py-2 rounded ${
