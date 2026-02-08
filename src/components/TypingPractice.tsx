@@ -2575,7 +2575,7 @@ export default function TypingPractice() {
                   {/* 드래그 오버레이 */}
                   {isDragging && (
                     <div className="absolute inset-0 bg-green-500 bg-opacity-50 z-10 flex items-center justify-center pointer-events-none">
-                      <span className="text-white text-2xl font-bold">여기에 영상 파일을 놓으세요</span>
+                      <span className="text-white text-2xl font-bold">여기에 영상/오디오 파일을 놓으세요</span>
                     </div>
                   )}
                   {videoSrc ? (
@@ -2623,7 +2623,7 @@ export default function TypingPractice() {
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 bg-gray-900 gap-2">
                       <span className="text-4xl">📁</span>
-                      <span>동영상 파일을 드래그하거나 선택하세요</span>
+                      <span>영상/오디오 파일을 드래그하거나 선택하세요</span>
                       <span className="text-sm">(여러 파일 선택 가능)</span>
                     </div>
                   )}
