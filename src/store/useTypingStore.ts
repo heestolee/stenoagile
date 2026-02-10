@@ -65,18 +65,6 @@ interface TypingState {
 
 const removeWhitespace = (text: string): string => text.replace(/\s+/g, "");
 
-const generateSentences = (words: string[]): string[] => {
-  return words.flatMap((word) => [
-    `최근 ${word}와 관련된 연구가 활발히 이루어지고 있습니다.`,
-    `문제를 분석할 때 ${word}의 개념을 적용해볼 수 있습니다.`,
-    `이런 접근 방식은 특히 ${word}에서 자주 쓰입니다.`,
-    `현대 사회에서 ${word}은 중요한 역할을 합니다.`,
-    `우리는 ${word}를 학습하며, ${word}에 대해 더 깊이 이해하게 됩니다.`,
-    `${word}는 시작이고, ${word}는 과정이며, ${word}는 결과입니다.`,
-    `많은 기업들이 핵심 역량으로 삼고 있는 것이 ${word}입니다.`,
-    `복잡해 보이지만 핵심은 언제나 ${word}입니다.`,
-  ]);
-};
 
 export const useTypingStore = create<TypingState>()(
   persist(
@@ -203,14 +191,9 @@ export const useTypingStore = create<TypingState>()(
             () => Math.random() - 0.5
           );
 
-          // 문장 모드: AI 문장이 이미 setSentences로 주입되었으면 그것을 사용
-          const currentSentences = state.sentences.length > 0
-            ? state.sentences
-            : generateSentences(words).sort(() => Math.random() - 0.5);
-
           set({
             shuffledWords: [...words].sort(() => Math.random() - 0.5),
-            sentences: currentSentences,
+            sentences: state.sentences,
             randomLetters: shuffledLetters,
             currentWordIndex: 0,
             currentSentenceIndex: 0,
@@ -220,9 +203,7 @@ export const useTypingStore = create<TypingState>()(
             incorrectCount: 0,
             incorrectWords: [],
             totalCount:
-              state.mode === "sentences"
-                ? currentSentences.length
-                : state.mode === "random"
+              state.mode === "random"
                 ? shuffledLetters.length
                 : words.length,
             progressCount: 0,
@@ -277,17 +258,22 @@ export const useTypingStore = create<TypingState>()(
           currentWordIndex,
           currentSentenceIndex,
           currentLetterIndex,
+          progressCount: currentProgress,
+          totalCount: currentTotal,
         } = get();
 
-        const trimmedInput = removeWhitespace(input);
+        const trimmedInput = mode === "sentences"
+          ? input.trim()
+          : removeWhitespace(input);
         const target =
           mode === "words"
             ? removeWhitespace(shuffledWords[currentWordIndex])
             : mode === "sentences"
-            ? removeWhitespace(sentences[currentSentenceIndex])
+            ? sentences[currentSentenceIndex].trim()
             : randomLetters[currentLetterIndex];
 
         const isCorrect = trimmedInput === target;
+        const isLastItem = currentProgress + 1 >= currentTotal && currentTotal > 0;
 
         set((state) => ({
           correctCount: isCorrect ? state.correctCount + 1 : state.correctCount,
@@ -299,11 +285,11 @@ export const useTypingStore = create<TypingState>()(
             : state.incorrectWords,
           currentWordIndex:
             mode === "words"
-              ? (currentWordIndex + 1) % shuffledWords.length
+              ? isLastItem ? currentWordIndex : (currentWordIndex + 1) % shuffledWords.length
               : currentWordIndex,
           currentSentenceIndex:
             mode === "sentences"
-              ? (currentSentenceIndex + 1) % sentences.length
+              ? isLastItem ? currentSentenceIndex : (currentSentenceIndex + 1) % sentences.length
               : currentSentenceIndex,
           currentLetterIndex:
             mode === "random"

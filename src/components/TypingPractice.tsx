@@ -173,14 +173,41 @@ export default function TypingPractice() {
   // 드로어 열림/닫힘 상태
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
 
+  // 단어/문장 모드 라운드 완료 결과
+  const [roundCompleteResult, setRoundCompleteResult] = useState<{
+    correct: number;
+    incorrect: number;
+    total: number;
+    avgKpm: number;
+    avgCpm: number;
+  } | null>(null);
+
   // AI 문장 생성 관련 상태
-  const [claudeApiKey, setClaudeApiKey] = useState(() => localStorage.getItem("claude_api_key") || "");
-  const [sentenceCount, setSentenceCount] = useState(() => {
-    const saved = localStorage.getItem("sentence_count");
-    return saved ? parseInt(saved, 10) : 5;
-  });
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+
+  // API 호출 횟수 추적 (태평양 시간 자정 = KST 17:00 리셋)
+  const [apiCallCount, setApiCallCount] = useState(() => {
+    const saved = localStorage.getItem("gemini_api_calls");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // 태평양 시간 기준 날짜 계산 (UTC-8)
+      const now = new Date();
+      const ptDate = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString().split("T")[0];
+      if (parsed.date === ptDate) return parsed.count;
+    }
+    return 0;
+  });
+  const incrementApiCallCount = () => {
+    setApiCallCount((prev: number) => {
+      const newCount = prev + 1;
+      const now = new Date();
+      const ptDate = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString().split("T")[0];
+      localStorage.setItem("gemini_api_calls", JSON.stringify({ date: ptDate, count: newCount }));
+      return newCount;
+    });
+  };
 
   // 현재 재생 중인 영상 URL
   const videoSrc = videoPlaylist.length > 0 ? videoPlaylist[currentVideoIndex]?.url : null;
@@ -558,6 +585,50 @@ export default function TypingPractice() {
     }
   }, [todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch]);
 
+  // 단어/문장 모드 라운드 완료 감지
+  useEffect(() => {
+    if (
+      (mode === "words" || mode === "sentences") &&
+      isPracticing &&
+      totalCount > 0 &&
+      progressCount >= totalCount
+    ) {
+      // 결과 저장 (stopPractice가 리셋하기 전에)
+      const avgKpm = allResults.length > 0
+        ? Math.round(allResults.reduce((sum, r) => sum + r.kpm, 0) / allResults.length)
+        : 0;
+      const avgCpm = allResults.length > 0
+        ? Math.round(allResults.reduce((sum, r) => sum + r.cpm, 0) / allResults.length)
+        : 0;
+      setRoundCompleteResult({
+        correct: correctCount,
+        incorrect: incorrectCount,
+        total: totalCount,
+        avgKpm,
+        avgCpm,
+      });
+      // 세션 로깅
+      if (allResults.length > 0) {
+        const totalElapsed = allResults.reduce((sum, r) => sum + r.elapsedTime, 0);
+        const total = correctCount + incorrectCount;
+        logSession({
+          mode,
+          totalResults: allResults.length,
+          avgKpm,
+          avgCpm,
+          correctCount,
+          incorrectCount,
+          accuracy: total > 0 ? (correctCount / total) * 100 : 0,
+          totalElapsedTime: totalElapsed,
+        });
+      }
+      // 연습 종료 + 드로어 열기 + 라운드 카운트 증가
+      stopPractice();
+      setIsDrawerOpen(true);
+      incrementCompletedRounds(practiceSlot, false);
+    }
+  }, [progressCount, totalCount, mode, isPracticing]);
+
   const clearAllTimeouts = () => {
     timeoutIds.current.forEach(clearTimeout);
     timeoutIds.current = [];
@@ -757,8 +828,32 @@ export default function TypingPractice() {
     reader.readAsText(file, "UTF-8");
   };
 
-  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) =>
-    updateTypedWord(event.target.value);
+  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    updateTypedWord(value);
+
+    // 문장 모드: 입력값이 정답과 일치하면 자동 제출
+    if (mode === "sentences" && isPracticing && sentences[currentSentenceIndex]) {
+      const target = sentences[currentSentenceIndex].trim();
+      if (value.trim() === target) {
+        // 타수/자수 계산
+        if (currentWordStartTime && currentWordKeystrokes > 0) {
+          const elapsedMs = Date.now() - currentWordStartTime;
+          if (elapsedMs >= 100) {
+            const elapsedMinutes = elapsedMs / 1000 / 60;
+            const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
+            const charCount = value.trim().replace(/\s+/g, '').length;
+            const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
+            setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
+            setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
+            logResult({ mode, kpm, cpm, elapsedTime: elapsedMs });
+          }
+        }
+        submitAnswer(value);
+        resetCurrentWordTracking();
+      }
+    }
+  };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (event.key === "Enter") {
@@ -989,6 +1084,8 @@ export default function TypingPractice() {
     } else {
       const words = inputText.trim().split("/").filter(Boolean);
       if (words.length > 0) {
+        // 이전 라운드 결과 초기화
+        setRoundCompleteResult(null);
         // 매매치라 모드 초기화
         setBatchStartIndex(0);
         setCurrentBatchChars("");
@@ -1009,12 +1106,18 @@ export default function TypingPractice() {
             // 타이핑 칸에 포커스
             setTimeout(() => typingTextareaRef.current?.focus(), 50);
           });
-        } else if (mode === "sentences" && claudeApiKey) {
-          // 문장 모드 + API 키 있음: AI 문장 생성
+        } else if (mode === "sentences") {
+          if (!geminiApiKey) {
+            setGenerateError("문장 모드를 사용하려면 API 키를 입력하세요.");
+            setIsDrawerOpen(true);
+            return;
+          }
+          // 문장 모드: AI 문장 생성
           setGenerateError(null);
           setIsGenerating(true);
           try {
-            const aiSentences = await generateSentencesAI(words, sentenceCount, claudeApiKey);
+            const aiSentences = await generateSentencesAI(words, words.length, geminiApiKey);
+            incrementApiCallCount();
             setSentences(aiSentences);
             startPractice(words);
           } catch (err) {
@@ -1024,8 +1127,7 @@ export default function TypingPractice() {
             setIsGenerating(false);
           }
         } else {
-          // 단어 모드 또는 문장 모드(API 키 없음, 템플릿 사용)
-          setSentences([]); // 템플릿 생성을 위해 비우기
+          // 단어 모드
           startPractice(words);
         }
       }
@@ -1694,24 +1796,6 @@ export default function TypingPractice() {
                     />
                     <span className="text-xs text-gray-500">배속</span>
                   </div>
-                  {mode === "sentences" && (
-                    <div className="flex items-center gap-1">
-                      <label className="text-xs whitespace-nowrap">문장 수</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={sentenceCount}
-                        onChange={(e) => {
-                          const val = Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 1));
-                          setSentenceCount(val);
-                          localStorage.setItem("sentence_count", String(val));
-                        }}
-                        className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                      <span className="text-xs text-gray-500">개</span>
-                    </div>
-                  )}
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">위 글자</label>
                     <input
@@ -1760,16 +1844,19 @@ export default function TypingPractice() {
                       <input
                         type="password"
                         className="flex-1 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder="sk-ant-..."
-                        value={claudeApiKey}
+                        placeholder="AIza..."
+                        value={geminiApiKey}
                         onChange={(e) => {
-                          setClaudeApiKey(e.target.value);
-                          localStorage.setItem("claude_api_key", e.target.value);
+                          setGeminiApiKey(e.target.value);
+                          localStorage.setItem("gemini_api_key", e.target.value);
                         }}
                       />
                     </div>
-                    {!claudeApiKey && (
-                      <p className="text-xs text-gray-500">API 키가 없으면 템플릿 문장이 사용됩니다.</p>
+                    {!geminiApiKey && (
+                      <p className="text-xs text-red-500">문장 모드를 사용하려면 API 키를 입력하세요.</p>
+                    )}
+                    {geminiApiKey && (
+                      <p className="text-xs text-gray-500">오늘 API 호출: {apiCallCount} / 1,500 (매일 17:00 리셋)</p>
                     )}
                     {generateError && (
                       <p className="text-xs text-red-500">{generateError}</p>
@@ -2065,6 +2152,26 @@ export default function TypingPractice() {
               >
                 {isGenerating ? "AI 문장 생성 중..." : isPracticing ? "연습 종료" : "연습 시작"}
               </button>
+              {todayCompletedRounds > 0 && (
+                <span className="text-sm text-gray-600 font-medium">
+                  오늘 {todayCompletedRounds}회 완료
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* 단어/문장 모드 라운드 완료 결과 */}
+          {roundCompleteResult && !isPracticing && (mode === "words" || mode === "sentences") && (
+            <div className="p-4 border-2 border-green-500 rounded bg-green-50">
+              <p className="text-lg font-bold text-green-700 mb-2">라운드 완료!</p>
+              <div className="flex gap-4 text-sm">
+                <span className="text-blue-600">정답: {roundCompleteResult.correct}</span>
+                <span className="text-rose-600">오답: {roundCompleteResult.incorrect}</span>
+                <span>총: {roundCompleteResult.total}문제</span>
+                {roundCompleteResult.avgKpm > 0 && (
+                  <span className="text-gray-600">평균 타수 {roundCompleteResult.avgKpm} / 자수 {roundCompleteResult.avgCpm}</span>
+                )}
+              </div>
             </div>
           )}
 
