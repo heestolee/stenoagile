@@ -1,7 +1,6 @@
 //테스트용 주석 추가
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useTypingStore } from "../store/useTypingStore";
-import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
 import { savedText1, savedText2, savedText5 } from "../constants";
 import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../utils/scoringAnalysis";
 import { logResult, logSession } from "../utils/sheetLogger";
@@ -940,16 +939,6 @@ export default function TypingPractice() {
     }
   };
 
-  const handleCpsChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const inputValue = event.target.value;
-    if (inputValue === "") return;
-
-    const cps = parseFloat(inputValue);
-    if (isNaN(cps)) return;
-
-    const clampedCps = clampCps(cps, 0, 10);
-    changeSpeechRate(cpsToRate(clampedCps));
-  };
 
   const handleStartOrStopPractice = async () => {
     // 카운트다운 중이거나 연습 중이면 중지
