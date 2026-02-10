@@ -1680,14 +1680,18 @@ export default function TypingPractice() {
           </button>
           <button
             className={`px-4 py-2 rounded ${
-              mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
+              mode === "sequential" && isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
-              switchMode("random");
+              if (!isBatchMode) {
+                stopPractice();
+                setIsRoundComplete(false);
+              }
+              switchMode("sequential");
+              setIsBatchMode(true);
             }}
           >
-            듣고 치라
+            매매 치라
           </button>
           <button
             className={`px-4 py-2 rounded ${
@@ -1712,18 +1716,14 @@ export default function TypingPractice() {
           </button>
           <button
             className={`px-4 py-2 rounded ${
-              mode === "sequential" && isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
+              mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (!isBatchMode) {
-                stopPractice();
-                setIsRoundComplete(false);
-              }
-              switchMode("sequential");
-              setIsBatchMode(true);
+              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              switchMode("random");
             }}
           >
-            매매 치라
+            듣고 치라
           </button>
         </div>
       </div>
