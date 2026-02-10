@@ -1982,6 +1982,10 @@ export default function TypingPractice() {
                         const size = parseInt(e.target.value);
                         if (!isNaN(size) && size >= 1 && size <= 100) {
                           setBatchSize(size);
+                          if (isPracticing && isBatchMode && !isReviewMode) {
+                            setCurrentBatchChars("");
+                            updateTypedWord("");
+                          }
                         }
                       }}
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
