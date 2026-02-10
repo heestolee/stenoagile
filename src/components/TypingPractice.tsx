@@ -1,10 +1,10 @@
 //테스트용 주석 추가
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useTypingStore } from "../store/useTypingStore";
-import { rateToCps, cpsToRate, clampCps } from "../utils/speechUtils";
 import { savedText1, savedText2, savedText5 } from "../constants";
 import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../utils/scoringAnalysis";
 import { logResult, logSession } from "../utils/sheetLogger";
+import { generateSentencesAI } from "../utils/generateSentencesAI";
 
 // IndexedDB 헬퍼 함수들
 const DB_NAME = 'StenoAgileDB';
@@ -95,6 +95,7 @@ export default function TypingPractice() {
     updateSequentialSpeed,
     incrementDisplayIndex,
     restartSequentialPractice,
+    setSentences,
   } = useTypingStore();
 
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
@@ -171,6 +172,15 @@ export default function TypingPractice() {
 
   // 드로어 열림/닫힘 상태
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+
+  // AI 문장 생성 관련 상태
+  const [claudeApiKey, setClaudeApiKey] = useState(() => localStorage.getItem("claude_api_key") || "");
+  const [sentenceCount, setSentenceCount] = useState(() => {
+    const saved = localStorage.getItem("sentence_count");
+    return saved ? parseInt(saved, 10) : 5;
+  });
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   // 현재 재생 중인 영상 URL
   const videoSrc = videoPlaylist.length > 0 ? videoPlaylist[currentVideoIndex]?.url : null;
@@ -929,18 +939,8 @@ export default function TypingPractice() {
     }
   };
 
-  const handleCpsChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const inputValue = event.target.value;
-    if (inputValue === "") return;
 
-    const cps = parseFloat(inputValue);
-    if (isNaN(cps)) return;
-
-    const clampedCps = clampCps(cps, 0, 10);
-    changeSpeechRate(cpsToRate(clampedCps));
-  };
-
-  const handleStartOrStopPractice = () => {
+  const handleStartOrStopPractice = async () => {
     // 카운트다운 중이거나 연습 중이면 중지
     if (isPracticing || countdown !== null) {
       window.speechSynthesis.cancel();
@@ -1009,7 +1009,23 @@ export default function TypingPractice() {
             // 타이핑 칸에 포커스
             setTimeout(() => typingTextareaRef.current?.focus(), 50);
           });
+        } else if (mode === "sentences" && claudeApiKey) {
+          // 문장 모드 + API 키 있음: AI 문장 생성
+          setGenerateError(null);
+          setIsGenerating(true);
+          try {
+            const aiSentences = await generateSentencesAI(words, sentenceCount, claudeApiKey);
+            setSentences(aiSentences);
+            startPractice(words);
+          } catch (err) {
+            setGenerateError(err instanceof Error ? err.message : "문장 생성에 실패했습니다.");
+            setIsDrawerOpen(true);
+          } finally {
+            setIsGenerating(false);
+          }
         } else {
+          // 단어 모드 또는 문장 모드(API 키 없음, 템플릿 사용)
+          setSentences([]); // 템플릿 생성을 위해 비우기
           startPractice(words);
         }
       }
@@ -1531,7 +1547,10 @@ export default function TypingPractice() {
             className={`px-4 py-2 rounded ${
               mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
-            onClick={() => switchMode("words")}
+            onClick={() => {
+              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              switchMode("words");
+            }}
           >
             단어
           </button>
@@ -1539,7 +1558,10 @@ export default function TypingPractice() {
             className={`px-4 py-2 rounded ${
               mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
-            onClick={() => switchMode("sentences")}
+            onClick={() => {
+              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              switchMode("sentences");
+            }}
           >
             문장
           </button>
@@ -1547,7 +1569,10 @@ export default function TypingPractice() {
             className={`px-4 py-2 rounded ${
               mode === "longtext" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
-            onClick={() => switchMode("longtext")}
+            onClick={() => {
+              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              switchMode("longtext");
+            }}
           >
             긴 글
           </button>
@@ -1555,7 +1580,10 @@ export default function TypingPractice() {
             className={`px-4 py-2 rounded ${
               mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
-            onClick={() => switchMode("random")}
+            onClick={() => {
+              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              switchMode("random");
+            }}
           >
             듣고 치라
           </button>
@@ -1640,6 +1668,114 @@ export default function TypingPractice() {
                 >
                   현재 문장 저장
                 </button>
+              </div>
+            )}
+
+            {/* 단어/문장 모드: 상세설정 */}
+            {(mode === "words" || mode === "sentences") && (
+              <div className="space-y-2 border-t pt-2">
+                <div className="text-sm font-semibold text-gray-600">상세설정</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs whitespace-nowrap">음성속도</label>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={10}
+                      step={0.1}
+                      value={speechRate.toFixed(1)}
+                      onChange={(e) => {
+                        const rate = parseFloat(e.target.value);
+                        if (!isNaN(rate) && rate >= 0.1 && rate <= 10) {
+                          changeSpeechRate(rate);
+                        }
+                      }}
+                      className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <span className="text-xs text-gray-500">배속</span>
+                  </div>
+                  {mode === "sentences" && (
+                    <div className="flex items-center gap-1">
+                      <label className="text-xs whitespace-nowrap">문장 수</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={sentenceCount}
+                        onChange={(e) => {
+                          const val = Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 1));
+                          setSentenceCount(val);
+                          localStorage.setItem("sentence_count", String(val));
+                        }}
+                        className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-gray-500">개</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs whitespace-nowrap">위 글자</label>
+                    <input
+                      type="number"
+                      min={12}
+                      max={48}
+                      step={0.1}
+                      value={displayFontSize}
+                      onChange={(e) => {
+                        const size = parseFloat(e.target.value);
+                        if (!isNaN(size) && size >= 12 && size <= 48) {
+                          setDisplayFontSize(size);
+                        }
+                      }}
+                      className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <span className="text-xs text-gray-500">px</span>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className={`px-2 py-1 rounded text-xs font-medium transition ${
+                      showText
+                        ? "bg-blue-500 text-white hover:bg-blue-600"
+                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                    }`}
+                    onClick={() => setShowText(!showText)}
+                  >
+                    글자 {showText ? "ON" : "OFF"}
+                  </button>
+                  <button
+                    className={`px-2 py-1 rounded text-xs font-medium transition ${
+                      isSoundEnabled
+                        ? "bg-blue-500 text-white hover:bg-blue-600"
+                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                    }`}
+                    onClick={toggleSound}
+                  >
+                    소리 {isSoundEnabled ? "ON" : "OFF"}
+                  </button>
+                </div>
+                {mode === "sentences" && (
+                  <>
+                    <div className="flex items-center gap-1">
+                      <label className="text-xs whitespace-nowrap">API 키</label>
+                      <input
+                        type="password"
+                        className="flex-1 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        placeholder="sk-ant-..."
+                        value={claudeApiKey}
+                        onChange={(e) => {
+                          setClaudeApiKey(e.target.value);
+                          localStorage.setItem("claude_api_key", e.target.value);
+                        }}
+                      />
+                    </div>
+                    {!claudeApiKey && (
+                      <p className="text-xs text-gray-500">API 키가 없으면 템플릿 문장이 사용됩니다.</p>
+                    )}
+                    {generateError && (
+                      <p className="text-xs text-red-500">{generateError}</p>
+                    )}
+                  </>
+                )}
               </div>
             )}
 
@@ -1893,26 +2029,15 @@ export default function TypingPractice() {
             <textarea
               className="w-full p-2 border rounded"
               rows={25}
-              placeholder="텍스트 파일을 드래그하여 넣을 수도 있습니다"
+              placeholder={mode === "sentences" || mode === "words"
+                ? "단어를 /로 구분하여 입력하세요\n(예: 경제/기술/환경)\n텍스트 파일을 드래그하여 넣을 수도 있습니다"
+                : "텍스트 파일을 드래그하여 넣을 수도 있습니다"}
               value={inputText}
               onChange={handleTextareaChange}
               onDrop={handleTextareaDrop}
               onDragOver={(e) => e.preventDefault()}
             />
           )}
-            {/* 연습 시작/종료 버튼 */}
-            {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
-              <button
-                className={`px-4 py-2 rounded font-semibold transition ${
-                  isPracticing
-                    ? "bg-gray-500 text-white hover:bg-gray-600"
-                    : "bg-blue-500 text-white hover:bg-blue-600"
-                }`}
-                onClick={handleStartOrStopPractice}
-              >
-                {isPracticing ? "연습 종료" : "연습 시작"}
-              </button>
-            )}
           </div>
         </div>
 
@@ -1928,54 +2053,18 @@ export default function TypingPractice() {
         {/* 메인 타이핑 영역 */}
         <div className="flex-1 flex flex-col gap-4 pl-4">
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <label className="font-medium whitespace-nowrap">읽기 속도:</label>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={10}
-                      step={0.1}
-                      value={rateToCps(speechRate).toFixed(1)}
-                      onChange={handleCpsChange}
-                      onBlur={(e) => {
-                        if (e.target.value === "") {
-                          changeSpeechRate(cpsToRate(3));
-                        }
-                      }}
-                      className="w-20 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-600">글자/초</span>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <label className="font-medium whitespace-nowrap">소리:</label>
-                  <button
-                    className={`px-4 py-2 rounded font-medium transition ${
-                      isSoundEnabled
-                        ? "bg-blue-500 text-white hover:bg-blue-600"
-                        : "bg-gray-300 text-gray-700 hover:bg-gray-400"
-                    }`}
-                    onClick={toggleSound}
-                  >
-                    {isSoundEnabled ? "ON" : "OFF"}
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={10}
-                step={0.1}
-                value={rateToCps(speechRate)}
-                onChange={(e) => {
-                  const cps = parseFloat(e.target.value);
-                  changeSpeechRate(cpsToRate(cps));
-                }}
-                className="w-full"
-              />
+            <div className="flex items-center gap-4">
+              <button
+                className={`px-4 py-2 rounded font-semibold transition ${
+                  isPracticing || isGenerating
+                    ? "bg-gray-500 text-white hover:bg-gray-600"
+                    : "bg-blue-500 text-white hover:bg-blue-600"
+                }`}
+                onClick={handleStartOrStopPractice}
+                disabled={isGenerating}
+              >
+                {isGenerating ? "AI 문장 생성 중..." : isPracticing ? "연습 종료" : "연습 시작"}
+              </button>
             </div>
           )}
 
@@ -2055,36 +2144,20 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <label className="font-medium whitespace-nowrap">글자 표시:</label>
-                <button
-                  className={`px-4 py-2 rounded font-medium transition ${
-                    showText
-                      ? "bg-blue-500 text-white hover:bg-blue-600"
-                      : "bg-gray-300 text-gray-700 hover:bg-gray-400"
-                  }`}
-                  onClick={() => setShowText(!showText)}
-                >
-                  {showText ? "ON" : "OFF"}
-                </button>
-              </div>
-
-              {isPracticing && (
-                <div className="flex flex-col items-end space-y-1">
-                  <div className="flex items-center space-x-4 text-sm font-medium">
-                    <span className="text-green-600">타수: {lastResult.kpm}/분</span>
-                    <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
-                  </div>
-                  {allResults.length > 0 && (
-                    <div className="flex items-center space-x-4 text-xs text-gray-600">
-                      <span>평균 타수: {calculateAverage().avgKpm}/분</span>
-                      <span>평균 자수: {calculateAverage().avgCpm}/분</span>
-                    </div>
-                  )}
+          {mode !== "sequential" && mode !== "longtext" && mode !== "random" && isPracticing && (
+            <div className="flex items-center justify-end">
+              <div className="flex flex-col items-end space-y-1">
+                <div className="flex items-center space-x-4 text-sm font-medium">
+                  <span className="text-green-600">타수: {lastResult.kpm}/분</span>
+                  <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
                 </div>
-              )}
+                {allResults.length > 0 && (
+                  <div className="flex items-center space-x-4 text-xs text-gray-600">
+                    <span>평균 타수: {calculateAverage().avgKpm}/분</span>
+                    <span>평균 자수: {calculateAverage().avgCpm}/분</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -2671,7 +2744,7 @@ export default function TypingPractice() {
 
           {showText && mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <div className="min-h-[200px] p-4 border rounded bg-gray-50">
-              <p className="font-semibold whitespace-pre-wrap">
+              <p className="font-semibold whitespace-pre-wrap" style={{ fontSize: `${displayFontSize}px` }}>
                 {mode === "words"
                   ? shuffledWords[currentWordIndex]
                   : mode === "sentences"

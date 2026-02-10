@@ -57,6 +57,7 @@ interface TypingState {
   incrementDisplayIndex: () => void;
   restartSequentialPractice: () => void;
 
+  setSentences: (sentences: string[]) => void;
   startPractice: (words: string[]) => void;
   stopPractice: () => void;
   submitAnswer: (input: string) => void;
@@ -142,6 +143,8 @@ export const useTypingStore = create<TypingState>()(
         currentDisplayIndex: state.currentDisplayIndex + 1
       })),
 
+      setSentences: (sentences) => set({ sentences }),
+
       restartSequentialPractice: () => {
         const state = get();
         // 기존 텍스트를 유지하면서 새로운 랜덤 순서로 재시작
@@ -200,9 +203,14 @@ export const useTypingStore = create<TypingState>()(
             () => Math.random() - 0.5
           );
 
+          // 문장 모드: AI 문장이 이미 setSentences로 주입되었으면 그것을 사용
+          const currentSentences = state.sentences.length > 0
+            ? state.sentences
+            : generateSentences(words).sort(() => Math.random() - 0.5);
+
           set({
             shuffledWords: [...words].sort(() => Math.random() - 0.5),
-            sentences: generateSentences(words).sort(() => Math.random() - 0.5),
+            sentences: currentSentences,
             randomLetters: shuffledLetters,
             currentWordIndex: 0,
             currentSentenceIndex: 0,
@@ -212,7 +220,11 @@ export const useTypingStore = create<TypingState>()(
             incorrectCount: 0,
             incorrectWords: [],
             totalCount:
-              state.mode === "random" ? shuffledLetters.length : words.length,
+              state.mode === "sentences"
+                ? currentSentences.length
+                : state.mode === "random"
+                ? shuffledLetters.length
+                : words.length,
             progressCount: 0,
             isPracticing: true,
             currentWordStartTime: null,
