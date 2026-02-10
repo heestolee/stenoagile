@@ -10,8 +10,8 @@ export async function generateSentencesAI(
   });
 
   if (!response.ok) {
-    const error = (await response.json()) as { error: string; details?: string };
-    throw new Error(error.error || "문장 생성에 실패했습니다.");
+    const error = (await response.json()) as { error: string };
+    throw new Error(error.error || `문장 생성 실패 (${response.status})`);
   }
 
   const data = (await response.json()) as { sentences: string[] };

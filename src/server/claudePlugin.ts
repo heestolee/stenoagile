@@ -14,7 +14,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 export function claudePlugin(): Plugin {
   return {
-    name: "claude-api-proxy",
+    name: "gemini-api-proxy",
     configureServer(server) {
       server.middlewares.use(
         "/api/generate-sentences",
@@ -59,28 +59,23 @@ export function claudePlugin(): Plugin {
 JSON 배열로만 응답하세요: ["문장1", "문장2", ...]`;
 
             const requestBody = JSON.stringify({
-              model: "claude-haiku-4-5-20251001",
-              max_tokens: 2048,
-              messages: [
+              contents: [
                 {
-                  role: "user",
-                  content: prompt,
+                  parts: [{ text: prompt }],
                 },
               ],
             });
 
-            // Use dynamic import for https module
             const https = await import("https");
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-            const apiResponse = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+            const callGemini = () => new Promise<{ status: number; body: string }>((resolve, reject) => {
               const apiReq = https.request(
-                "https://api.anthropic.com/v1/messages",
+                url,
                 {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
-                    "x-api-key": apiKey,
-                    "anthropic-version": "2023-06-01",
                     "Content-Length": Buffer.byteLength(requestBody),
                   },
                 },
@@ -99,22 +94,33 @@ JSON 배열로만 응답하세요: ["문장1", "문장2", ...]`;
               apiReq.end();
             });
 
+            // 429 시 최대 3회 재시도 (2초, 4초 대기)
+            let apiResponse = await callGemini();
+            for (let retry = 0; retry < 3 && apiResponse.status === 429; retry++) {
+              await new Promise(r => setTimeout(r, (retry + 1) * 2000));
+              apiResponse = await callGemini();
+            }
+
             if (apiResponse.status !== 200) {
+              let errorDetail = "";
+              try {
+                const errBody = JSON.parse(apiResponse.body) as { error?: { message?: string } };
+                errorDetail = errBody.error?.message || apiResponse.body;
+              } catch { errorDetail = apiResponse.body; }
               res.statusCode = apiResponse.status;
               res.setHeader("Content-Type", "application/json");
               res.end(
                 JSON.stringify({
-                  error: `Claude API 오류: ${apiResponse.status}`,
-                  details: apiResponse.body,
+                  error: `Gemini API 오류 (${apiResponse.status}): ${errorDetail}`,
                 })
               );
               return;
             }
 
             const data = JSON.parse(apiResponse.body) as {
-              content: { type: string; text: string }[];
+              candidates: { content: { parts: { text: string }[] } }[];
             };
-            const text = data.content[0]?.text || "[]";
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
 
             // JSON 배열 파싱
             const jsonMatch = text.match(/\[[\s\S]*\]/);
