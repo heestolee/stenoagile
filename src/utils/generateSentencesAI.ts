@@ -3,7 +3,7 @@ export async function generateSentencesStream(
   count: number,
   apiKey: string,
   onSentence: (sentence: string, index: number) => void,
-  onDone: (total: number) => void,
+  onDone: (total: number) => void | Promise<void>,
   onError: (error: string) => void,
   onModel?: (model: string) => void,
   signal?: AbortSignal,
@@ -60,7 +60,7 @@ export async function generateSentencesStream(
           onSentence(data.sentence, data.index);
         }
         if (data.done && data.total !== undefined) {
-          onDone(data.total);
+          try { await onDone(data.total); } catch { /* onDone 에러 무시 */ }
         }
       } catch {
         // 파싱 실패 무시
