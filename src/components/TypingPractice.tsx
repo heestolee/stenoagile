@@ -1034,7 +1034,6 @@ export default function TypingPractice() {
 
       submitAnswer(typedWord);
       resetCurrentWordTracking(); // 다음 단어를 위해 리셋
-      setDisplayElapsedTime(0);
       return;
     }
 
@@ -1062,6 +1061,7 @@ export default function TypingPractice() {
       // 첫 번째 키 입력 시 타이머 시작
       if (!currentWordStartTime) {
         startCurrentWordTracking();
+        setDisplayElapsedTime(0);
       }
       incrementCurrentWordKeystrokes();
     }
@@ -2476,7 +2476,7 @@ export default function TypingPractice() {
                 <div className="flex items-center space-x-4 text-sm font-medium">
                   <span className="text-green-600">타수: {lastResult.kpm}/분</span>
                   <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
-                  <span className="text-orange-600">시간: {formatTime(currentWordStartTime ? displayElapsedTime : lastResult.elapsedTime)}</span>
+                  <span className="text-orange-600">시간: {formatTime(displayElapsedTime)}</span>
                 </div>
                 {allResults.length > 0 && allResults.length % 50 === 0 && (
                   <div className="flex items-center space-x-4 text-xs text-gray-600">
