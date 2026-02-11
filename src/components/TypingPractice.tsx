@@ -191,6 +191,7 @@ export default function TypingPractice() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
   const [aiModelName, setAiModelName] = useState("");
+  const aiModelNameRef = useRef("");
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [retryCountdown, setRetryCountdown] = useState(0);
   const retryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -219,14 +220,39 @@ export default function TypingPractice() {
     }
     return 0;
   });
-  const incrementApiCallCount = () => {
-    setApiCallCount((prev: number) => {
-      const newCount = prev + 1;
+  const [apiCallModels, setApiCallModels] = useState<Record<string, number>>(() => {
+    const saved = localStorage.getItem("gemini_api_calls");
+    if (saved) {
+      const parsed = JSON.parse(saved);
       const now = new Date();
       const ptDate = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString().split("T")[0];
-      localStorage.setItem("gemini_api_calls", JSON.stringify({ date: ptDate, count: newCount }));
-      return newCount;
-    });
+      if (parsed.date === ptDate) return parsed.models || {};
+    }
+    return {};
+  });
+  const incrementApiCallCount = () => {
+    try {
+      const modelName = aiModelNameRef.current;
+      const now = new Date();
+      const ptDate = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString().split("T")[0];
+      let existing: { date?: string; count?: number; models?: Record<string, number> } = {};
+      try {
+        const saved = localStorage.getItem("gemini_api_calls");
+        if (saved) existing = JSON.parse(saved);
+      } catch { /* 파싱 실패 시 초기화 */ }
+      const currentCount = (existing.date === ptDate && typeof existing.count === "number") ? existing.count : 0;
+      const newCount = currentCount + 1;
+      const models: Record<string, number> = (existing.date === ptDate && existing.models && typeof existing.models === "object") ? { ...existing.models } : {};
+      if (modelName) {
+        models[modelName] = (models[modelName] || 0) + 1;
+      }
+      const data = { date: ptDate, count: newCount, models };
+      localStorage.setItem("gemini_api_calls", JSON.stringify(data));
+      setApiCallCount(newCount);
+      setApiCallModels({ ...models });
+    } catch (e) {
+      console.error("[incrementApiCallCount] error:", e);
+    }
   };
 
   // 현재 재생 중인 영상 URL
@@ -1058,8 +1084,9 @@ export default function TypingPractice() {
         setIsRoundComplete(false);
       }
 
-      // 첫 번째 키 입력 시 타이머 시작
+      // 첫 번째 키 입력 시 타이머 시작 (공백은 무시 — '. ' 약어 패턴의 잔여 스페이스 방지)
       if (!currentWordStartTime) {
+        if (event.key === ' ' || event.key === 'Backspace' || event.key === 'Delete') return;
         startCurrentWordTracking();
         setDisplayElapsedTime(0);
       }
@@ -1170,7 +1197,6 @@ export default function TypingPractice() {
             const BATCH_SIZE = 2500; // 번호추적 프롬프트로 1회 호출에 최대 2500개 안정 생성
             let totalGenerated = 0;
             let started = false;
-
             const generateBatch = async (): Promise<void> => {
               const remaining = targetCount - totalGenerated;
               if (remaining <= 0) {
@@ -1198,7 +1224,6 @@ export default function TypingPractice() {
                   }
                 },
                 async (batchTotal) => {
-                  incrementApiCallCount();
                   if (totalGenerated < targetCount && batchTotal > 0) {
                     // 아직 남았으면 다음 배치 호출 (출력 토큰 한도로 인한 분할)
                     await generateBatch();
@@ -1215,7 +1240,7 @@ export default function TypingPractice() {
                   generateAbortRef.current = null;
                   if (totalGenerated > 0) setTotalCount(totalGenerated);
                 },
-                (model) => setAiModelName(model),
+                (model) => { aiModelNameRef.current = model; setAiModelName(model); incrementApiCallCount(); },
                 abortController.signal,
               );
             };
@@ -2055,7 +2080,16 @@ export default function TypingPractice() {
                       <p className="text-xs text-red-500">문장 모드를 사용하려면 API 키를 입력하세요.</p>
                     )}
                     {geminiApiKey && (
-                      <p className="text-xs text-gray-500">오늘 API 호출: {apiCallCount} / 20 (매일 17:00 리셋)</p>
+                      <div className="text-xs text-gray-500">
+                        <p>오늘 API 호출: {apiCallCount}회 (매일 17:00 리셋)</p>
+                        <div className="ml-2 mt-0.5 space-y-0">
+                          {["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-2.5-flash-preview-09-2025", "gemini-2.5-flash-lite", "gemini-2.5-flash-lite-preview-09-2025", "gemini-2.0-flash", "gemini-2.0-flash-lite"].map((model) => (
+                            <p key={model} className={apiCallModels[model] ? "text-gray-700" : "text-gray-300"}>
+                              {model}: {apiCallModels[model] || 0}회
+                            </p>
+                          ))}
+                        </div>
+                      </div>
                     )}
                     {generateError && (
                       <p className="text-xs text-red-500">{generateError}</p>
@@ -2358,7 +2392,7 @@ export default function TypingPractice() {
                   }`}
                   onClick={handleStartOrStopPractice}
                 >
-                  {isGenerating ? "문장 생성 중..." : isPracticing && mode === "sentences" && generatedCount > 0 ? "문장 생성 완료" : isPracticing ? "연습 종료" : "연습 시작"}
+                  {isGenerating ? "문장 생성 중..." : isPracticing && mode === "sentences" && generatedCount > 0 ? "문장 생성 완료" : isPracticing ? "연습 종료" : mode === "sentences" ? "문장 생성 시작" : "연습 시작"}
                 </button>
                 {todayCompletedRounds > 0 && (
                   <span className="text-sm text-gray-600 font-medium">
