@@ -5,11 +5,14 @@ export async function generateSentencesStream(
   onSentence: (sentence: string, index: number) => void,
   onDone: (total: number) => void,
   onError: (error: string) => void,
+  onModel?: (model: string) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await fetch("/api/generate-sentences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ words, count, apiKey }),
+    signal,
   });
 
   if (!response.ok) {
@@ -44,10 +47,14 @@ export async function generateSentencesStream(
           done?: boolean;
           total?: number;
           error?: string;
+          model?: string;
         };
         if (data.error) {
           onError(data.error);
           return;
+        }
+        if (data.model && onModel) {
+          onModel(data.model);
         }
         if (data.sentence !== undefined && data.index !== undefined) {
           onSentence(data.sentence, data.index);

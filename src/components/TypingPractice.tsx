@@ -189,9 +189,11 @@ export default function TypingPractice() {
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
+  const [aiModelName, setAiModelName] = useState("");
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [retryCountdown, setRetryCountdown] = useState(0);
   const retryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const generateAbortRef = useRef<AbortController | null>(null);
   // 문장모드 상태 보존 (모드 전환 시 API 호출 절약)
   const savedSentenceStateRef = useRef<{
     sentences: string[];
@@ -855,26 +857,30 @@ export default function TypingPractice() {
     const value = event.target.value;
     updateTypedWord(value);
 
-    // 문장 모드: 입력값이 정답과 일치하면 자동 제출
-    if (mode === "sentences" && isPracticing && sentences[currentSentenceIndex]) {
-      const target = sentences[currentSentenceIndex].trim();
-      if (value.trim() === target) {
-        // 타수/자수 계산
-        if (currentWordStartTime && currentWordKeystrokes > 0) {
-          const elapsedMs = Date.now() - currentWordStartTime;
-          if (elapsedMs >= 100) {
-            const elapsedMinutes = elapsedMs / 1000 / 60;
-            const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
-            const charCount = value.trim().replace(/\s+/g, '').length;
-            const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
-            setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
-            setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
-            logResult({ mode, kpm, cpm, elapsedTime: elapsedMs });
-          }
+    // 단어/문장 모드: 입력값이 정답과 일치하면 자동 제출
+    const autoSubmitTarget =
+      mode === "sentences" && isPracticing && sentences[currentSentenceIndex]
+        ? sentences[currentSentenceIndex].trim()
+        : mode === "words" && isPracticing && shuffledWords[currentWordIndex]
+          ? shuffledWords[currentWordIndex].trim()
+          : null;
+
+    if (autoSubmitTarget && value.trim() === autoSubmitTarget) {
+      // 타수/자수 계산
+      if (currentWordStartTime && currentWordKeystrokes > 0) {
+        const elapsedMs = Date.now() - currentWordStartTime;
+        if (elapsedMs >= 100) {
+          const elapsedMinutes = elapsedMs / 1000 / 60;
+          const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
+          const charCount = value.trim().replace(/\s+/g, '').length;
+          const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
+          setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
+          logResult({ mode, kpm, cpm, elapsedTime: elapsedMs });
         }
-        submitAnswer(value);
-        resetCurrentWordTracking();
       }
+      submitAnswer(value);
+      resetCurrentWordTracking();
     }
   };
 
@@ -1059,6 +1065,16 @@ export default function TypingPractice() {
 
 
   const handleStartOrStopPractice = async () => {
+    // 생성 중에 클릭하면 생성만 중지하고 기존 문장으로 계속 연습
+    if (isGenerating) {
+      generateAbortRef.current?.abort();
+      generateAbortRef.current = null;
+      setIsGenerating(false);
+      if (generatedCount > 0) {
+        setTotalCount(generatedCount);
+      }
+      return;
+    }
     // 카운트다운 중이거나 연습 중이면 중지
     if (isPracticing || countdown !== null) {
       window.speechSynthesis.cancel();
@@ -1139,11 +1155,15 @@ export default function TypingPractice() {
               setIsDrawerOpen(true);
               return;
             }
-            // 문장 모드: AI 문장 스트리밍 생성 (자동 연속 호출)
+            // 문장 모드: AI 문장 스트리밍 생성 (배치 분할)
             setGenerateError(null);
             setIsGenerating(true);
             setGeneratedCount(0);
+            setAiModelName("");
+            const abortController = new AbortController();
+            generateAbortRef.current = abortController;
             const targetCount = words.length;
+            const BATCH_SIZE = 2500; // 번호추적 프롬프트로 1회 호출에 최대 2500개 안정 생성
             let totalGenerated = 0;
             let started = false;
 
@@ -1151,13 +1171,16 @@ export default function TypingPractice() {
               const remaining = targetCount - totalGenerated;
               if (remaining <= 0) {
                 setIsGenerating(false);
+                generateAbortRef.current = null;
                 setTotalCount(totalGenerated);
                 return;
               }
 
+              const batchCount = Math.min(BATCH_SIZE, remaining);
+
               await generateSentencesStream(
                 words,
-                remaining,
+                batchCount,
                 geminiApiKey,
                 (sentence, _index) => {
                   totalGenerated++;
@@ -1173,11 +1196,11 @@ export default function TypingPractice() {
                 async (batchTotal) => {
                   incrementApiCallCount();
                   if (totalGenerated < targetCount && batchTotal > 0) {
-                    // 아직 남았으면 2초 대기 후 다음 호출
-                    await new Promise(r => setTimeout(r, 2000));
+                    // 아직 남았으면 다음 배치 호출 (출력 토큰 한도로 인한 분할)
                     await generateBatch();
                   } else {
                     setIsGenerating(false);
+                    generateAbortRef.current = null;
                     setTotalCount(totalGenerated);
                   }
                 },
@@ -1185,17 +1208,22 @@ export default function TypingPractice() {
                   setGenerateErrorWithRetry(error);
                   setIsDrawerOpen(true);
                   setIsGenerating(false);
+                  generateAbortRef.current = null;
                   if (totalGenerated > 0) setTotalCount(totalGenerated);
                 },
+                (model) => setAiModelName(model),
+                abortController.signal,
               );
             };
 
             try {
               await generateBatch();
             } catch (err) {
+              if (err instanceof DOMException && err.name === "AbortError") return;
               setGenerateErrorWithRetry(err instanceof Error ? err.message : "문장 생성에 실패했습니다.");
               setIsDrawerOpen(true);
               setIsGenerating(false);
+              generateAbortRef.current = null;
               if (totalGenerated > 0) setTotalCount(totalGenerated);
             }
           }
@@ -2316,27 +2344,33 @@ export default function TypingPractice() {
         {/* 메인 타이핑 영역 */}
         <div className="flex-1 flex flex-col gap-4 pl-4">
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
-            <div className="flex items-center gap-4">
-              <button
-                className={`px-4 py-2 rounded font-semibold transition ${
-                  isPracticing || (mode === "sentences" && isGenerating)
-                    ? "bg-gray-500 text-white hover:bg-gray-600"
-                    : "bg-blue-500 text-white hover:bg-blue-600"
-                }`}
-                onClick={handleStartOrStopPractice}
-                disabled={mode === "sentences" && isGenerating}
-              >
-                {mode === "sentences" && isGenerating ? `AI 문장 생성 중... (${generatedCount}/${inputText.trim().split("/").filter(Boolean).length})` : isPracticing && mode === "sentences" && generatedCount > 0 ? `문장 생성 완료 (${generatedCount}/${inputText.trim().split("/").filter(Boolean).length}) | 연습 종료` : isPracticing ? "연습 종료" : "연습 시작"}
-              </button>
-              {todayCompletedRounds > 0 && (
-                <span className="text-sm text-gray-600 font-medium">
-                  오늘 {todayCompletedRounds}회 완료
-                </span>
-              )}
-              {mode === "sentences" && generateError && (
-                <span className="text-sm text-red-500 font-medium">
-                  {getErrorMessage(generateError)}
-                </span>
+            <div>
+              <div className="flex items-center gap-4">
+                <button
+                  className={`px-4 py-2 rounded font-semibold transition ${
+                    isPracticing || (mode === "sentences" && isGenerating)
+                      ? "bg-gray-500 text-white hover:bg-gray-600"
+                      : "bg-blue-500 text-white hover:bg-blue-600"
+                  }`}
+                  onClick={handleStartOrStopPractice}
+                >
+                  {isGenerating ? "문장 생성 중..." : isPracticing && mode === "sentences" && generatedCount > 0 ? "문장 생성 완료" : isPracticing ? "연습 종료" : "연습 시작"}
+                </button>
+                {todayCompletedRounds > 0 && (
+                  <span className="text-sm text-gray-600 font-medium">
+                    오늘 {todayCompletedRounds}회 완료
+                  </span>
+                )}
+                {mode === "sentences" && generateError && (
+                  <span className="text-sm text-red-500 font-medium">
+                    {getErrorMessage(generateError)}
+                  </span>
+                )}
+              </div>
+              {mode === "sentences" && (isGenerating || (isPracticing && generatedCount > 0)) && (
+                <div className="text-xs text-gray-500 mt-1">
+                  ({generatedCount}/{inputText.trim().split("/").filter(Boolean).length}){aiModelName ? ` [${aiModelName}]` : ""}
+                </div>
               )}
             </div>
           )}
@@ -2433,13 +2467,14 @@ export default function TypingPractice() {
           )}
 
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && isPracticing && (
-            <div className="flex items-center justify-end">
-              <div className="flex flex-col items-end space-y-1">
+            <div className="flex items-center">
+              <div className="flex flex-col space-y-1">
                 <div className="flex items-center space-x-4 text-sm font-medium">
                   <span className="text-green-600">타수: {lastResult.kpm}/분</span>
                   <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
+                  <span className="text-orange-600">시간: {formatTime(lastResult.elapsedTime)}</span>
                 </div>
-                {allResults.length > 0 && (
+                {allResults.length > 0 && allResults.length % 50 === 0 && (
                   <div className="flex items-center space-x-4 text-xs text-gray-600">
                     <span>평균 타수: {calculateAverage().avgKpm}/분</span>
                     <span>평균 자수: {calculateAverage().avgCpm}/분</span>
