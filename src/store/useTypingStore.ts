@@ -58,9 +58,20 @@ interface TypingState {
   restartSequentialPractice: () => void;
 
   setSentences: (sentences: string[]) => void;
+  addSentence: (sentence: string) => void;
+  setTotalCount: (count: number) => void;
   startPractice: (words: string[]) => void;
   stopPractice: () => void;
   submitAnswer: (input: string) => void;
+  resumeSentencePractice: (state: {
+    sentences: string[];
+    currentSentenceIndex: number;
+    progressCount: number;
+    correctCount: number;
+    incorrectCount: number;
+    incorrectWords: IncorrectEntry[];
+    totalCount: number;
+  }) => void;
 }
 
 const removeWhitespace = (text: string): string => text.replace(/\s+/g, "");
@@ -132,6 +143,24 @@ export const useTypingStore = create<TypingState>()(
       })),
 
       setSentences: (sentences) => set({ sentences }),
+      addSentence: (sentence) => set((state) => ({
+        sentences: [...state.sentences, sentence],
+      })),
+      setTotalCount: (count) => set({ totalCount: count }),
+
+      resumeSentencePractice: (saved) => set({
+        sentences: saved.sentences,
+        currentSentenceIndex: saved.currentSentenceIndex,
+        progressCount: saved.progressCount,
+        correctCount: saved.correctCount,
+        incorrectCount: saved.incorrectCount,
+        incorrectWords: saved.incorrectWords,
+        totalCount: saved.totalCount,
+        isPracticing: true,
+        typedWord: "",
+        currentWordStartTime: null,
+        currentWordKeystrokes: 0,
+      }),
 
       restartSequentialPractice: () => {
         const state = get();
