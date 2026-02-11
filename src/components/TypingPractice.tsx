@@ -4,7 +4,7 @@ import { useTypingStore } from "../store/useTypingStore";
 import { savedText1, savedText2, savedText5 } from "../constants";
 import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../utils/scoringAnalysis";
 import { logResult, logSession } from "../utils/sheetLogger";
-import { generateSentencesAI } from "../utils/generateSentencesAI";
+import { generateSentencesStream } from "../utils/generateSentencesAI";
 
 // IndexedDB 헬퍼 함수들
 const DB_NAME = 'StenoAgileDB';
@@ -96,6 +96,9 @@ export default function TypingPractice() {
     incrementDisplayIndex,
     restartSequentialPractice,
     setSentences,
+    addSentence,
+    setTotalCount,
+    resumeSentencePractice,
   } = useTypingStore();
 
   const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
@@ -185,7 +188,21 @@ export default function TypingPractice() {
   // AI 문장 생성 관련 상태
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedCount, setGeneratedCount] = useState(0);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [retryCountdown, setRetryCountdown] = useState(0);
+  const retryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 문장모드 상태 보존 (모드 전환 시 API 호출 절약)
+  const savedSentenceStateRef = useRef<{
+    sentences: string[];
+    generatedCount: number;
+    currentSentenceIndex: number;
+    progressCount: number;
+    correctCount: number;
+    incorrectCount: number;
+    incorrectWords: typeof incorrectWords;
+    totalCount: number;
+  } | null>(null);
 
   // API 호출 횟수 추적 (태평양 시간 자정 = KST 17:00 리셋)
   const [apiCallCount, setApiCallCount] = useState(() => {
@@ -808,6 +825,12 @@ export default function TypingPractice() {
 
   const handleTextareaDrop = (event: React.DragEvent<HTMLTextAreaElement>) => {
     event.preventDefault();
+    // 텍스트 드래그&드롭 처리
+    const droppedText = event.dataTransfer.getData("text/plain");
+    if (droppedText) {
+      updateInputText(inputText ? inputText + "/" + droppedText : droppedText);
+      return;
+    }
     const file = event.dataTransfer.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -1107,24 +1130,74 @@ export default function TypingPractice() {
             setTimeout(() => typingTextareaRef.current?.focus(), 50);
           });
         } else if (mode === "sentences") {
-          if (!geminiApiKey) {
-            setGenerateError("문장 모드를 사용하려면 API 키를 입력하세요.");
-            setIsDrawerOpen(true);
-            return;
-          }
-          // 문장 모드: AI 문장 생성
-          setGenerateError(null);
-          setIsGenerating(true);
-          try {
-            const aiSentences = await generateSentencesAI(words, words.length, geminiApiKey);
-            incrementApiCallCount();
-            setSentences(aiSentences);
-            startPractice(words);
-          } catch (err) {
-            setGenerateError(err instanceof Error ? err.message : "문장 생성에 실패했습니다.");
-            setIsDrawerOpen(true);
-          } finally {
-            setIsGenerating(false);
+          // 저장된 문장이 있으면 API 호출 없이 바로 사용
+          if (savedSentenceStateRef.current) {
+            restoreSentenceState();
+          } else {
+            if (!geminiApiKey) {
+              setGenerateError("문장 모드를 사용하려면 API 키를 입력하세요.");
+              setIsDrawerOpen(true);
+              return;
+            }
+            // 문장 모드: AI 문장 스트리밍 생성 (자동 연속 호출)
+            setGenerateError(null);
+            setIsGenerating(true);
+            setGeneratedCount(0);
+            const targetCount = words.length;
+            let totalGenerated = 0;
+            let started = false;
+
+            const generateBatch = async (): Promise<void> => {
+              const remaining = targetCount - totalGenerated;
+              if (remaining <= 0) {
+                setIsGenerating(false);
+                setTotalCount(totalGenerated);
+                return;
+              }
+
+              await generateSentencesStream(
+                words,
+                remaining,
+                geminiApiKey,
+                (sentence, _index) => {
+                  totalGenerated++;
+                  setGeneratedCount(totalGenerated);
+                  if (!started) {
+                    started = true;
+                    setSentences([sentence]);
+                    startPractice(words);
+                  } else {
+                    addSentence(sentence);
+                  }
+                },
+                async (batchTotal) => {
+                  incrementApiCallCount();
+                  if (totalGenerated < targetCount && batchTotal > 0) {
+                    // 아직 남았으면 2초 대기 후 다음 호출
+                    await new Promise(r => setTimeout(r, 2000));
+                    await generateBatch();
+                  } else {
+                    setIsGenerating(false);
+                    setTotalCount(totalGenerated);
+                  }
+                },
+                (error) => {
+                  setGenerateErrorWithRetry(error);
+                  setIsDrawerOpen(true);
+                  setIsGenerating(false);
+                  if (totalGenerated > 0) setTotalCount(totalGenerated);
+                },
+              );
+            };
+
+            try {
+              await generateBatch();
+            } catch (err) {
+              setGenerateErrorWithRetry(err instanceof Error ? err.message : "문장 생성에 실패했습니다.");
+              setIsDrawerOpen(true);
+              setIsGenerating(false);
+              if (totalGenerated > 0) setTotalCount(totalGenerated);
+            }
           }
         } else {
           // 단어 모드
@@ -1640,6 +1713,88 @@ export default function TypingPractice() {
     }
   }, [isFullyComplete]);
 
+  // 문장모드 상태 저장 (다른 모드로 전환 시)
+  const saveSentenceState = () => {
+    if (mode === "sentences" && sentences.length > 0) {
+      savedSentenceStateRef.current = {
+        sentences: [...sentences],
+        generatedCount,
+        currentSentenceIndex,
+        progressCount,
+        correctCount,
+        incorrectCount,
+        incorrectWords: [...incorrectWords],
+        totalCount,
+      };
+    }
+  };
+
+  // API 에러 발생 시 카운트다운 시작
+  const setGenerateErrorWithRetry = (error: string) => {
+    setGenerateError(error);
+    // 기존 타이머 정리
+    if (retryTimerRef.current) clearInterval(retryTimerRef.current);
+    // RPD(일일 한도) 에러면 카운트다운 없이 에러만 유지
+    const limitMatch = error.match(/limit:\s*(\d+)/);
+    const limit = limitMatch ? parseInt(limitMatch[1]) : 0;
+    if (limit >= 20) {
+      setRetryCountdown(0);
+      return;
+    }
+    // RPM 에러: retry 시간 파싱 후 카운트다운
+    const retryMatch = error.match(/retry in ([\d.]+)s/);
+    if (retryMatch) {
+      let seconds = Math.ceil(parseFloat(retryMatch[1]));
+      setRetryCountdown(seconds);
+      retryTimerRef.current = setInterval(() => {
+        seconds--;
+        if (seconds <= 0) {
+          if (retryTimerRef.current) clearInterval(retryTimerRef.current);
+          retryTimerRef.current = null;
+          setRetryCountdown(0);
+          setGenerateError(null);
+        } else {
+          setRetryCountdown(seconds);
+        }
+      }, 1000);
+    }
+  };
+
+  // API 에러 메시지를 한글로 변환
+  const getErrorMessage = (error: string): string => {
+    if (error.includes("429")) {
+      const limitMatch = error.match(/limit:\s*(\d+)/);
+      const limit = limitMatch ? parseInt(limitMatch[1]) : 0;
+      // limit: 20 = RPD(일일), limit: 5 = RPM(분당)
+      if (limit >= 20) {
+        return "일일 호출 한도 초과 (RPD 20회). 17:00 리셋까지 기다려주세요.";
+      }
+      if (retryCountdown > 0) {
+        return `분당 호출 한도 초과 (RPM). ${retryCountdown}초 후 다시 시도하세요.`;
+      }
+      return "호출 한도 초과. 잠시 후 다시 시도하세요.";
+    }
+    if (error.includes("API 키")) return error;
+    return `오류: ${error}`;
+  };
+
+  // 문장모드 상태 복원 (문장모드로 돌아올 때)
+  const restoreSentenceState = () => {
+    const saved = savedSentenceStateRef.current;
+    if (saved) {
+      setGeneratedCount(saved.generatedCount);
+      resumeSentencePractice({
+        sentences: saved.sentences,
+        currentSentenceIndex: saved.currentSentenceIndex,
+        progressCount: saved.progressCount,
+        correctCount: saved.correctCount,
+        incorrectCount: saved.incorrectCount,
+        incorrectWords: saved.incorrectWords,
+        totalCount: saved.totalCount,
+      });
+    }
+  };
+
   return (
     <div className="p-4 w-full">
       <div className="flex items-center gap-4 mb-4">
@@ -1650,7 +1805,8 @@ export default function TypingPractice() {
               mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              saveSentenceState();
+              if (isPracticing || countdown !== null) { stopPractice(); setBatchStartIndex(0); setCurrentBatchChars(""); setIsReviewMode(false); setReviewBatches([]); setReviewIndex(0); setIsBatchReviewDone(false); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
               switchMode("words");
             }}
           >
@@ -1661,8 +1817,9 @@ export default function TypingPractice() {
               mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              if (isPracticing || countdown !== null) { stopPractice(); setBatchStartIndex(0); setCurrentBatchChars(""); setIsReviewMode(false); setReviewBatches([]); setReviewIndex(0); setIsBatchReviewDone(false); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
               switchMode("sentences");
+              restoreSentenceState();
             }}
           >
             문장
@@ -1672,7 +1829,8 @@ export default function TypingPractice() {
               mode === "longtext" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              saveSentenceState();
+              if (isPracticing || countdown !== null) { stopPractice(); setBatchStartIndex(0); setCurrentBatchChars(""); setIsReviewMode(false); setReviewBatches([]); setReviewIndex(0); setIsBatchReviewDone(false); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
               switchMode("longtext");
             }}
           >
@@ -1683,8 +1841,15 @@ export default function TypingPractice() {
               mode === "sequential" && isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (!isBatchMode) {
+              saveSentenceState();
+              if (!isBatchMode || mode !== "sequential") {
                 stopPractice();
+                setBatchStartIndex(0);
+                setCurrentBatchChars("");
+                setIsReviewMode(false);
+                setReviewBatches([]);
+                setReviewIndex(0);
+                setIsBatchReviewDone(false);
                 setIsRoundComplete(false);
               }
               switchMode("sequential");
@@ -1698,7 +1863,8 @@ export default function TypingPractice() {
               mode === "sequential" && !isBatchMode ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (isBatchMode) {
+              saveSentenceState();
+              if (isBatchMode || mode !== "sequential") {
                 stopPractice();
                 setBatchStartIndex(0);
                 setCurrentBatchChars("");
@@ -1719,7 +1885,8 @@ export default function TypingPractice() {
               mode === "random" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (isPracticing || countdown !== null) { stopPractice(); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              saveSentenceState();
+              if (isPracticing || countdown !== null) { stopPractice(); setBatchStartIndex(0); setCurrentBatchChars(""); setIsReviewMode(false); setReviewBatches([]); setReviewIndex(0); setIsBatchReviewDone(false); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
               switchMode("random");
             }}
           >
@@ -1856,7 +2023,7 @@ export default function TypingPractice() {
                       <p className="text-xs text-red-500">문장 모드를 사용하려면 API 키를 입력하세요.</p>
                     )}
                     {geminiApiKey && (
-                      <p className="text-xs text-gray-500">오늘 API 호출: {apiCallCount} / 1,500 (매일 17:00 리셋)</p>
+                      <p className="text-xs text-gray-500">오늘 API 호출: {apiCallCount} / 20 (매일 17:00 리셋)</p>
                     )}
                     {generateError && (
                       <p className="text-xs text-red-500">{generateError}</p>
@@ -2116,6 +2283,11 @@ export default function TypingPractice() {
               )}
             </>
           )}
+          {(mode === "words" || mode === "sentences") && inputText.trim() && (
+            <p className="text-xs text-gray-500">
+              단어 {inputText.trim().split("/").filter(Boolean).length}개
+            </p>
+          )}
           {mode !== "random" && (
             <textarea
               className="w-full p-2 border rounded"
@@ -2147,18 +2319,23 @@ export default function TypingPractice() {
             <div className="flex items-center gap-4">
               <button
                 className={`px-4 py-2 rounded font-semibold transition ${
-                  isPracticing || isGenerating
+                  isPracticing || (mode === "sentences" && isGenerating)
                     ? "bg-gray-500 text-white hover:bg-gray-600"
                     : "bg-blue-500 text-white hover:bg-blue-600"
                 }`}
                 onClick={handleStartOrStopPractice}
-                disabled={isGenerating}
+                disabled={mode === "sentences" && isGenerating}
               >
-                {isGenerating ? "AI 문장 생성 중..." : isPracticing ? "연습 종료" : "연습 시작"}
+                {mode === "sentences" && isGenerating ? `AI 문장 생성 중... (${generatedCount}/${inputText.trim().split("/").filter(Boolean).length})` : isPracticing && mode === "sentences" && generatedCount > 0 ? `문장 생성 완료 (${generatedCount}/${inputText.trim().split("/").filter(Boolean).length}) | 연습 종료` : isPracticing ? "연습 종료" : "연습 시작"}
               </button>
               {todayCompletedRounds > 0 && (
                 <span className="text-sm text-gray-600 font-medium">
                   오늘 {todayCompletedRounds}회 완료
+                </span>
+              )}
+              {mode === "sentences" && generateError && (
+                <span className="text-sm text-red-500 font-medium">
+                  {getErrorMessage(generateError)}
                 </span>
               )}
             </div>
@@ -2878,7 +3055,7 @@ export default function TypingPractice() {
               <p className="text-sm font-medium">
                 <span className="text-blue-600">정답: {correctCount}</span> |{" "}
                 <span className="text-rose-600">오답: {incorrectCount}</span> |
-                진행: {progressCount} / {totalCount}
+                진행: {progressCount} / {mode === "sentences" && generatedCount > 0 ? generatedCount : totalCount}
               </p>
 
               <div>

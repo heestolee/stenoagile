@@ -12,6 +12,58 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+// 누적 텍스트에서 완성된 문장을 하나씩 추출
+function extractSentences(accumulated: string): { sentences: string[]; remaining: string } {
+  const sentences: string[] = [];
+  let text = accumulated;
+
+  // JSON 배열 시작 "[" 찾기
+  const arrStart = text.indexOf("[");
+  if (arrStart === -1) return { sentences: [], remaining: text };
+  text = text.slice(arrStart + 1);
+
+  // "문장" 패턴을 반복 추출
+  while (true) {
+    // 다음 문자열 시작 찾기
+    const quoteStart = text.indexOf('"');
+    if (quoteStart === -1) break;
+
+    // 닫는 따옴표 찾기 (이스케이프 처리)
+    let i = quoteStart + 1;
+    let found = false;
+    while (i < text.length) {
+      if (text[i] === '\\') {
+        i += 2; // 이스케이프 문자 건너뛰기
+        continue;
+      }
+      if (text[i] === '"') {
+        found = true;
+        break;
+      }
+      i++;
+    }
+
+    if (!found) break; // 아직 닫는 따옴표가 안 옴
+
+    const sentence = text.slice(quoteStart + 1, i).replace(/\\"/g, '"').replace(/\\n/g, '\n');
+    sentences.push(sentence);
+    text = text.slice(i + 1);
+
+    // 다음 쉼표 또는 ] 건너뛰기
+    const nextComma = text.indexOf(",");
+    const nextBracket = text.indexOf("]");
+    if (nextBracket !== -1 && (nextComma === -1 || nextBracket < nextComma)) {
+      // 배열 끝
+      break;
+    }
+    if (nextComma !== -1) {
+      text = text.slice(nextComma + 1);
+    }
+  }
+
+  return { sentences, remaining: text };
+}
+
 export function claudePlugin(): Plugin {
   return {
     name: "gemini-api-proxy",
@@ -64,83 +116,103 @@ JSON 배열로만 응답하세요: ["문장1", "문장2", ...]`;
                   parts: [{ text: prompt }],
                 },
               ],
+              generationConfig: {
+                maxOutputTokens: 65536,
+                thinkingConfig: {
+                  thinkingBudget: 0,
+                },
+              },
             });
 
             const https = await import("https");
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
 
-            const callGemini = () => new Promise<{ status: number; body: string }>((resolve, reject) => {
-              const apiReq = https.request(
-                url,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Content-Length": Buffer.byteLength(requestBody),
-                  },
-                },
-                (apiRes) => {
-                  let data = "";
-                  apiRes.on("data", (chunk: Buffer) => {
-                    data += chunk.toString();
-                  });
-                  apiRes.on("end", () => {
-                    resolve({ status: apiRes.statusCode || 500, body: data });
-                  });
-                }
-              );
-              apiReq.on("error", reject);
-              apiReq.write(requestBody);
-              apiReq.end();
+            // SSE 헤더 설정
+            res.writeHead(200, {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
             });
 
-            // 429 시 최대 3회 재시도 (2초, 4초 대기)
-            let apiResponse = await callGemini();
-            for (let retry = 0; retry < 3 && apiResponse.status === 429; retry++) {
-              await new Promise(r => setTimeout(r, (retry + 1) * 2000));
-              apiResponse = await callGemini();
-            }
+            const apiReq = https.request(
+              url,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Content-Length": Buffer.byteLength(requestBody),
+                },
+              },
+              (apiRes) => {
+                if (apiRes.statusCode !== 200) {
+                  let errData = "";
+                  apiRes.on("data", (chunk: Buffer) => { errData += chunk.toString(); });
+                  apiRes.on("end", () => {
+                    let errorDetail = errData;
+                    try {
+                      const errBody = JSON.parse(errData) as { error?: { message?: string } };
+                      errorDetail = errBody.error?.message || errData;
+                    } catch { /* keep raw */ }
+                    res.write(`data: ${JSON.stringify({ error: `Gemini API 오류 (${apiRes.statusCode}): ${errorDetail}` })}\n\n`);
+                    res.end();
+                  });
+                  return;
+                }
 
-            if (apiResponse.status !== 200) {
-              let errorDetail = "";
-              try {
-                const errBody = JSON.parse(apiResponse.body) as { error?: { message?: string } };
-                errorDetail = errBody.error?.message || apiResponse.body;
-              } catch { errorDetail = apiResponse.body; }
-              res.statusCode = apiResponse.status;
-              res.setHeader("Content-Type", "application/json");
-              res.end(
-                JSON.stringify({
-                  error: `Gemini API 오류 (${apiResponse.status}): ${errorDetail}`,
-                })
-              );
-              return;
-            }
+                let accumulated = "";
+                let sentSoFar = 0;
 
-            const data = JSON.parse(apiResponse.body) as {
-              candidates: { content: { parts: { text: string }[] } }[];
-            };
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+                apiRes.on("data", (chunk: Buffer) => {
+                  const chunkStr = chunk.toString();
+                  // SSE 형식에서 data: 라인 추출
+                  const lines = chunkStr.split("\n");
+                  for (const line of lines) {
+                    if (!line.startsWith("data: ")) continue;
+                    const jsonStr = line.slice(6);
+                    try {
+                      const parsed = JSON.parse(jsonStr) as {
+                        candidates?: { content?: { parts?: { text?: string }[] } }[];
+                      };
+                      const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                      if (text) {
+                        accumulated += text;
+                      }
+                    } catch {
+                      // 파싱 실패 시 무시 (불완전한 청크)
+                    }
+                  }
 
-            // JSON 배열 파싱
-            const jsonMatch = text.match(/\[[\s\S]*\]/);
-            if (!jsonMatch) {
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(
-                JSON.stringify({ error: "AI 응답에서 문장을 파싱할 수 없습니다." })
-              );
-              return;
-            }
+                  // 누적 텍스트에서 새 문장 추출 (count 제한)
+                  const { sentences } = extractSentences(accumulated);
+                  const limit = Math.min(sentences.length, count);
+                  for (let i = sentSoFar; i < limit; i++) {
+                    res.write(`data: ${JSON.stringify({ sentence: sentences[i], index: i })}\n\n`);
+                  }
+                  sentSoFar = sentences.length;
+                });
 
-            const sentences = JSON.parse(jsonMatch[0]) as string[];
+                apiRes.on("end", () => {
+                  // 최종 파싱 (남은 문장 처리, count 제한)
+                  const { sentences } = extractSentences(accumulated);
+                  const limit = Math.min(sentences.length, count);
+                  for (let i = sentSoFar; i < limit; i++) {
+                    res.write(`data: ${JSON.stringify({ sentence: sentences[i], index: i })}\n\n`);
+                  }
+                  res.write(`data: ${JSON.stringify({ done: true, total: limit })}\n\n`);
+                  res.end();
+                });
+              }
+            );
 
-            res.statusCode = 200;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ sentences }));
+            apiReq.on("error", (err) => {
+              res.write(`data: ${JSON.stringify({ error: `서버 오류: ${String(err)}` })}\n\n`);
+              res.end();
+            });
+
+            apiReq.write(requestBody);
+            apiReq.end();
           } catch (err) {
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
+            res.writeHead(500, { "Content-Type": "application/json" });
             res.end(
               JSON.stringify({
                 error: "서버 오류가 발생했습니다.",
