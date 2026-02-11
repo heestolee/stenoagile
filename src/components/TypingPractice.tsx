@@ -1058,8 +1058,9 @@ export default function TypingPractice() {
         setIsRoundComplete(false);
       }
 
-      // 첫 번째 키 입력 시 타이머 시작
+      // 첫 번째 키 입력 시 타이머 시작 (공백은 무시 — '. ' 약어 패턴의 잔여 스페이스 방지)
       if (!currentWordStartTime) {
+        if (event.key === ' ' || event.key === 'Backspace' || event.key === 'Delete') return;
         startCurrentWordTracking();
         setDisplayElapsedTime(0);
       }
