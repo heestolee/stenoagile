@@ -133,6 +133,7 @@ export default function TypingPractice() {
   const videoRef = useRef<HTMLVideoElement | null>(null); // 비디오 요소 참조
   const dropZoneRef = useRef<HTMLDivElement | null>(null); // 드롭 존 참조
   const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // 타이핑 칸 참조
+  const isAutoSubmittingRef = useRef(false); // 자동 제출 중복 방지
   const displayAreaRef = useRef<HTMLDivElement | null>(null); // 원문 표시 영역 참조
 
   // 매매치라 모드 상태
@@ -854,6 +855,7 @@ export default function TypingPractice() {
   };
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (isAutoSubmittingRef.current) return; // 자동 제출 직후 IME 잔여 이벤트 무시
     const value = event.target.value;
     updateTypedWord(value);
 
@@ -865,22 +867,23 @@ export default function TypingPractice() {
           ? shuffledWords[currentWordIndex].trim()
           : null;
 
-    if (autoSubmitTarget && value.trim() === autoSubmitTarget) {
+    if (autoSubmitTarget && value.trim() === autoSubmitTarget && !isAutoSubmittingRef.current) {
+      isAutoSubmittingRef.current = true;
       // 타수/자수 계산
-      if (currentWordStartTime && currentWordKeystrokes > 0) {
-        const elapsedMs = Date.now() - currentWordStartTime;
-        if (elapsedMs >= 100) {
-          const elapsedMinutes = elapsedMs / 1000 / 60;
-          const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
-          const charCount = value.trim().replace(/\s+/g, '').length;
-          const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
-          setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
-          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
-          logResult({ mode, kpm, cpm, elapsedTime: elapsedMs });
-        }
+      const elapsedMs = (currentWordStartTime && currentWordKeystrokes > 0) ? Date.now() - currentWordStartTime : 0;
+      if (elapsedMs >= 100) {
+        const elapsedMinutes = elapsedMs / 1000 / 60;
+        const kpm = Math.min(3000, Math.round(currentWordKeystrokes / elapsedMinutes));
+        const charCount = value.trim().replace(/\s+/g, '').length;
+        const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
+        setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
+        setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
+        logResult({ mode, kpm, cpm, elapsedTime: elapsedMs });
       }
       submitAnswer(value);
       resetCurrentWordTracking();
+      // IME의 후속 onChange 이벤트가 중복 제출하지 않도록 잠시 가드
+      setTimeout(() => { isAutoSubmittingRef.current = false; }, 50);
     }
   };
 
@@ -1058,6 +1061,7 @@ export default function TypingPractice() {
       // 첫 번째 키 입력 시 타이머 시작
       if (!currentWordStartTime) {
         startCurrentWordTracking();
+        setDisplayElapsedTime(0);
       }
       incrementCurrentWordKeystrokes();
     }
@@ -2472,7 +2476,7 @@ export default function TypingPractice() {
                 <div className="flex items-center space-x-4 text-sm font-medium">
                   <span className="text-green-600">타수: {lastResult.kpm}/분</span>
                   <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
-                  <span className="text-orange-600">시간: {formatTime(lastResult.elapsedTime)}</span>
+                  <span className="text-orange-600">시간: {formatTime(displayElapsedTime)}</span>
                 </div>
                 {allResults.length > 0 && allResults.length % 50 === 0 && (
                   <div className="flex items-center space-x-4 text-xs text-gray-600">
@@ -3080,6 +3084,8 @@ export default function TypingPractice() {
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <>
               <input
+                key={mode === "sentences" ? currentSentenceIndex : currentWordIndex}
+                autoFocus
                 type="text"
                 className="w-full p-2 border rounded"
                 value={typedWord}
