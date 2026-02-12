@@ -18,22 +18,3 @@ export const cpsToRate = (cps: number): number => {
   return cps / BASE_CPS;
 };
 
-/**
- * Web Speech API rate를 CPS로 변환
- * @param rate - Web Speech API rate 값
- * @returns 초당 글자 수
- */
-export const rateToCps = (rate: number): number => {
-  return rate * BASE_CPS;
-};
-
-/**
- * CPS 값을 유효 범위로 제한
- * @param cps - 초당 글자 수
- * @param min - 최소값 (기본 1)
- * @param max - 최대값 (기본 5)
- * @returns 제한된 CPS 값
- */
-export const clampCps = (cps: number, min = 1, max = 5): number => {
-  return Math.max(min, Math.min(max, cps));
-};

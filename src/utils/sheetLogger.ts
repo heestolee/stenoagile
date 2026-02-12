@@ -102,22 +102,3 @@ export const logSession = async (session: SessionData): Promise<void> => {
   await sendToSheet(data);
 };
 
-// 오답 로깅
-export interface MistakeData {
-  mode: string;
-  word: string;
-  typed: string;
-}
-
-export const logMistake = async (mistake: MistakeData): Promise<void> => {
-  const data = {
-    type: 'mistake',
-    sessionId: getSessionId(),
-    timestamp: getTimestamp(),
-    mode: MODE_LABELS[mistake.mode] || mistake.mode,
-    word: mistake.word,
-    typed: mistake.typed,
-  };
-
-  await sendToSheet(data);
-};

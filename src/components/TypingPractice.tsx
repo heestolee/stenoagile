@@ -1,58 +1,22 @@
 //테스트용 주석 추가
-import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useMemo } from "react";
 import { useTypingStore } from "../store/useTypingStore";
 import { savedText1, savedText2, savedText5 } from "../constants";
+import { GEMINI_MODEL_NAMES, SENTENCE_STYLES } from "../constants/uiConstants";
 import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../utils/scoringAnalysis";
 import { logResult, logSession } from "../utils/sheetLogger";
 import { generateSentencesStream } from "../utils/generateSentencesAI";
+import { useVideoPlayer } from "../hooks/useVideoPlayer";
+import { useHeamiVoice } from "../hooks/useHeamiVoice";
+import { useAIGeneration } from "../hooks/useAIGeneration";
+import { useSlotManager } from "../hooks/useSlotManager";
 
-// IndexedDB 헬퍼 함수들
-const DB_NAME = 'StenoAgileDB';
-const STORE_NAME = 'videos';
-
-const openDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
-      }
-    };
-  });
-};
-
-const saveVideosToDB = async (files: { name: string; data: ArrayBuffer }[]) => {
-  const db = await openDB();
-  const tx = db.transaction(STORE_NAME, 'readwrite');
-  const store = tx.objectStore(STORE_NAME);
-
-  // 기존 데이터 삭제
-  store.clear();
-
-  // 새 데이터 저장
-  files.forEach((file, index) => {
-    store.add({ id: index, name: file.name, data: file.data });
-  });
-
-  return new Promise<void>((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-};
-
-const loadVideosFromDB = async (): Promise<{ name: string; data: ArrayBuffer }[]> => {
-  const db = await openDB();
-  const tx = db.transaction(STORE_NAME, 'readonly');
-  const store = tx.objectStore(STORE_NAME);
-  const request = store.getAll();
-
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result.map(r => ({ name: r.name, data: r.data })));
-    request.onerror = () => reject(request.error);
-  });
+// 경과 시간을 "분:초.밀리초" 형태로 포맷팅 (밀리초 단위 입력)
+const formatTime = (ms: number): string => {
+  const totalSeconds = ms / 1000;
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins}:${secs.toFixed(3).padStart(6, '0')}`;
 };
 
 export default function TypingPractice() {
@@ -101,19 +65,21 @@ export default function TypingPractice() {
     resumeSentencePractice,
   } = useTypingStore();
 
-  const [heamiVoice, setHeamiVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [showText, setShowText] = useState(true);
-  const timeoutIds = useRef<number[]>([]);
   const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0, elapsedTime: 0 });
   const [allResults, setAllResults] = useState<{ kpm: number, cpm: number, elapsedTime: number, chars: string }[]>([]);
   const sequentialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
-  const [slotNames, setSlotNames] = useState<{ [key: number]: string }>({});
-  const [favoriteSlots, setFavoriteSlots] = useState<Set<number>>(new Set());
+  const {
+    selectedSlot, setSelectedSlot, slotNames, favoriteSlots,
+    todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch,
+    practiceSlot, setPracticeSlot, pendingIncrementSlot, setPendingIncrementSlot,
+    incrementCompletedRounds, handleRenameSlot, toggleFavoriteSlot, handleSaveToSlot,
+  } = useSlotManager(inputText);
   const [displayFontSize, setDisplayFontSize] = useState(20); // 위쪽 표시 영역 글자 크기
   const [inputFontSize, setInputFontSize] = useState(19.5); // 아래쪽 타이핑 영역 글자 크기
   const [charsPerRead, setCharsPerRead] = useState(3); // 몇 글자씩 읽을지
   const [sequentialSpeechRate, setSequentialSpeechRate] = useState(1); // 보고치라 음성 속도 (1배속)
+  const { speakText, clearAllTimeouts } = useHeamiVoice(isSoundEnabled, speechRate, sequentialSpeechRate);
   const [countdown, setCountdown] = useState<number | null>(null); // 카운트다운 상태
   const [, setRoundStartTime] = useState<number | null>(null); // 라운드 시작 시간
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,17 +87,6 @@ export default function TypingPractice() {
   const [accumulatedKeystrokes, setAccumulatedKeystrokes] = useState(0); // 누적 타수
   const [accumulatedElapsedMs, setAccumulatedElapsedMs] = useState(0); // 누적 경과 시간
   const [displayElapsedTime, setDisplayElapsedTime] = useState(0); // 실시간 표시용 경과 시간
-  const [videoPlaylist, setVideoPlaylist] = useState<{ name: string; url: string; data?: ArrayBuffer }[]>([]); // 재생목록
-  const [currentVideoIndex, setCurrentVideoIndex] = useState(0); // 현재 재생 중인 영상 인덱스
-  const [videoPlaybackRate, setVideoPlaybackRate] = useState(1); // 동영상 재생 속도
-  const [videoVolume, setVideoVolume] = useState(0.05); // 동영상 볼륨 (0~1)
-  const [videoLoop, setVideoLoop] = useState(false); // 반복 재생
-  const [playlistLoop, setPlaylistLoop] = useState(false); // 재생목록 반복
-  const [abRepeat, setAbRepeat] = useState<{ a: number | null; b: number | null }>({ a: null, b: null }); // 구간 반복
-  const [skipSeconds, setSkipSeconds] = useState(5); // 건너뛰기 초
-  const [isDragging, setIsDragging] = useState(false); // 드래그 상태
-  const videoRef = useRef<HTMLVideoElement | null>(null); // 비디오 요소 참조
-  const dropZoneRef = useRef<HTMLDivElement | null>(null); // 드롭 존 참조
   const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // 타이핑 칸 참조
   const isAutoSubmittingRef = useRef(false); // 자동 제출 중복 방지
   const displayAreaRef = useRef<HTMLDivElement | null>(null); // 원문 표시 영역 참조
@@ -148,10 +103,18 @@ export default function TypingPractice() {
   const [reviewIndex, setReviewIndex] = useState(0); // 현재 복습 중인 인덱스
   const [isBatchReviewDone, setIsBatchReviewDone] = useState(false); // 복습까지 완전히 끝났는지
 
-  // YouTube 관련 상태
-  const [videoSourceTab, setVideoSourceTab] = useState<'upload' | 'youtube'>('upload');
-  const [youtubeUrl, setYoutubeUrl] = useState('');
-  const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
+  // 비디오 플레이어 훅
+  const {
+    videoPlaylist, currentVideoIndex, setCurrentVideoIndex,
+    videoPlaybackRate, setVideoPlaybackRate, videoVolume, setVideoVolume,
+    videoLoop, setVideoLoop, playlistLoop, setPlaylistLoop,
+    abRepeat, setAbRepeat, skipSeconds, setSkipSeconds, isDragging,
+    videoSourceTab, setVideoSourceTab, youtubeUrl, setYoutubeUrl, youtubeVideoId,
+    videoRef, dropZoneRef, videoSrc,
+    handleYoutubeUrlSubmit, removeVideoFromPlaylist,
+    clearPlaylist, playPreviousVideo, playNextVideo,
+    handleDragEnter, handleDragOver, handleDragLeave, handleDrop,
+  } = useVideoPlayer(mode);
 
   // 하이라이트용 상태 (아래칸 hover 시 윗칸 해당 위치 표시)
   const [hoveredOrigIdx, setHoveredOrigIdx] = useState<number | null>(null);
@@ -163,16 +126,6 @@ export default function TypingPractice() {
   const [showResumeHighlight, setShowResumeHighlight] = useState(false);
   const [resumePosition, setResumePosition] = useState(0);
 
-  // 오늘 완료한 라운드 수
-  const [todayCompletedRounds, setTodayCompletedRounds] = useState(0);
-  // 슬롯별 완료한 라운드 수 (보교치라)
-  const [slotCompletedRoundsNormal, setSlotCompletedRoundsNormal] = useState<Record<number, number>>({});
-  // 슬롯별 완료한 라운드 수 (매매치라)
-  const [slotCompletedRoundsBatch, setSlotCompletedRoundsBatch] = useState<Record<number, number>>({});
-  // 연습 시작 시 슬롯 저장 (도중에 다른 슬롯 눌러도 표시 안 바뀌게)
-  const [practiceSlot, setPracticeSlot] = useState<number | null>(null);
-  // 카운트다운 중 표시할 방금 완료한 슬롯 (아직 increment 안 됨)
-  const [pendingIncrementSlot, setPendingIncrementSlot] = useState<number | null>(null);
 
   // 드로어 열림/닫힘 상태
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
@@ -186,17 +139,15 @@ export default function TypingPractice() {
     avgCpm: number;
   } | null>(null);
 
-  // AI 문장 생성 관련 상태
-  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedCount, setGeneratedCount] = useState(0);
-  const [aiModelName, setAiModelName] = useState("");
-  const [sentenceStyle, setSentenceStyle] = useState("뉴스/일상 대화체");
-  const aiModelNameRef = useRef("");
-  const [generateError, setGenerateError] = useState<string | null>(null);
-  const [retryCountdown, setRetryCountdown] = useState(0);
-  const retryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const generateAbortRef = useRef<AbortController | null>(null);
+  // AI 문장 생성 훅
+  const {
+    geminiApiKey, setGeminiApiKey, isGenerating, setIsGenerating,
+    generatedCount, setGeneratedCount, aiModelName, setAiModelName,
+    sentenceStyle, setSentenceStyle, aiModelNameRef,
+    generateError, setGenerateError, generateAbortRef,
+    apiCallCount, apiCallModels, incrementApiCallCount,
+    setGenerateErrorWithRetry, getErrorMessage,
+  } = useAIGeneration();
   // 문장모드 상태 보존 (모드 전환 시 API 호출 절약)
   const savedSentenceStateRef = useRef<{
     sentences: string[];
@@ -209,373 +160,7 @@ export default function TypingPractice() {
     totalCount: number;
   } | null>(null);
 
-  // API 호출 횟수 추적 (태평양 시간 자정 = KST 17:00 리셋)
-  const [apiCallCount, setApiCallCount] = useState(() => {
-    const saved = localStorage.getItem("gemini_api_calls");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // 태평양 시간 기준 날짜 계산 (UTC-8)
-      const now = new Date();
-      const ptDate = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString().split("T")[0];
-      if (parsed.date === ptDate) return parsed.count;
-    }
-    return 0;
-  });
-  const [apiCallModels, setApiCallModels] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem("gemini_api_calls");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const now = new Date();
-      const ptDate = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString().split("T")[0];
-      if (parsed.date === ptDate) return parsed.models || {};
-    }
-    return {};
-  });
-  const incrementApiCallCount = () => {
-    try {
-      const modelName = aiModelNameRef.current;
-      const now = new Date();
-      const ptDate = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString().split("T")[0];
-      let existing: { date?: string; count?: number; models?: Record<string, number> } = {};
-      try {
-        const saved = localStorage.getItem("gemini_api_calls");
-        if (saved) existing = JSON.parse(saved);
-      } catch { /* 파싱 실패 시 초기화 */ }
-      const currentCount = (existing.date === ptDate && typeof existing.count === "number") ? existing.count : 0;
-      const newCount = currentCount + 1;
-      const models: Record<string, number> = (existing.date === ptDate && existing.models && typeof existing.models === "object") ? { ...existing.models } : {};
-      if (modelName) {
-        models[modelName] = (models[modelName] || 0) + 1;
-      }
-      const data = { date: ptDate, count: newCount, models };
-      localStorage.setItem("gemini_api_calls", JSON.stringify(data));
-      setApiCallCount(newCount);
-      setApiCallModels({ ...models });
-    } catch (e) {
-      console.error("[incrementApiCallCount] error:", e);
-    }
-  };
 
-  // 현재 재생 중인 영상 URL
-  const videoSrc = videoPlaylist.length > 0 ? videoPlaylist[currentVideoIndex]?.url : null;
-
-  // YouTube URL에서 video ID 추출
-  const extractYoutubeVideoId = (url: string): string | null => {
-    const pattern = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/;
-    const match = url.match(pattern);
-    return match ? match[1] : null;
-  };
-
-  // YouTube URL 입력 처리
-  const handleYoutubeUrlSubmit = () => {
-    const videoId = extractYoutubeVideoId(youtubeUrl);
-    setYoutubeVideoId(videoId);
-  };
-
-  // IndexedDB에 재생목록 저장
-  const savePlaylistToDB = useCallback(async (playlist: { name: string; url: string; data?: ArrayBuffer }[]) => {
-    const dataToSave = playlist
-      .filter(v => v.data)
-      .map(v => ({ name: v.name, data: v.data! }));
-    if (dataToSave.length > 0) {
-      await saveVideosToDB(dataToSave);
-    }
-  }, []);
-
-  // 재생목록에 영상/오디오 추가
-  const addVideosToPlaylist = async (files: FileList | File[]) => {
-    const mediaExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.mp3', '.wav', '.m4a', '.aac'];
-    const existingNames = new Set(videoPlaylist.map(v => v.name));
-    const validFiles = Array.from(files).filter(file => {
-      // 이미 있는 파일은 제외
-      if (existingNames.has(file.name)) return false;
-      if (file.type.startsWith('video/') || file.type.startsWith('audio/')) return true;
-      const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
-      return mediaExtensions.includes(ext);
-    });
-
-    // 파일 데이터를 ArrayBuffer로 읽기
-    const newVideos = await Promise.all(
-      validFiles.map(async (file) => {
-        const data = await file.arrayBuffer();
-        const blob = new Blob([data], { type: file.type || 'video/mp4' });
-        return {
-          name: file.name,
-          url: URL.createObjectURL(blob),
-          data
-        };
-      })
-    );
-
-    if (newVideos.length > 0) {
-      setVideoPlaylist(prev => {
-        const wasEmpty = prev.length === 0;
-        if (wasEmpty) {
-          setCurrentVideoIndex(0);
-        }
-        const updated = [...prev, ...newVideos];
-        // IndexedDB에 저장
-        savePlaylistToDB(updated);
-        return updated;
-      });
-    }
-  };
-
-  // 재생목록에서 영상 제거
-  const removeVideoFromPlaylist = (index: number) => {
-    const video = videoPlaylist[index];
-    if (video) {
-      URL.revokeObjectURL(video.url);
-    }
-    setVideoPlaylist(prev => {
-      const updated = prev.filter((_, i) => i !== index);
-      savePlaylistToDB(updated);
-      return updated;
-    });
-    // 현재 재생 중인 영상이 삭제된 경우 처리
-    if (index === currentVideoIndex) {
-      setCurrentVideoIndex(Math.min(index, videoPlaylist.length - 2));
-    } else if (index < currentVideoIndex) {
-      setCurrentVideoIndex(prev => prev - 1);
-    }
-  };
-
-  // 재생목록 전체 삭제
-  const clearPlaylist = async () => {
-    videoPlaylist.forEach(video => URL.revokeObjectURL(video.url));
-    setVideoPlaylist([]);
-    setCurrentVideoIndex(0);
-    localStorage.removeItem('videoCurrentIndex');
-    localStorage.removeItem('videoCurrentTime');
-    // IndexedDB 비우기
-    const db = await openDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).clear();
-  };
-
-  // 이전 영상
-  const playPreviousVideo = () => {
-    if (videoPlaylist.length === 0) return;
-    if (currentVideoIndex > 0) {
-      setCurrentVideoIndex(prev => prev - 1);
-    } else if (playlistLoop) {
-      setCurrentVideoIndex(videoPlaylist.length - 1);
-    }
-  };
-
-  // 다음 영상
-  const playNextVideo = () => {
-    if (videoPlaylist.length === 0) return;
-    if (currentVideoIndex < videoPlaylist.length - 1) {
-      setCurrentVideoIndex(prev => prev + 1);
-    } else if (playlistLoop) {
-      setCurrentVideoIndex(0);
-    }
-  };
-
-  // 드래그 앤 드롭 핸들러
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer.types.includes('Files')) {
-      setIsDragging(true);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer.types.includes('Files')) {
-      setIsDragging(true);
-    }
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // relatedTarget이 드롭존 밖으로 나갔을 때만 드래그 상태 해제
-    const rect = dropZoneRef.current?.getBoundingClientRect();
-    if (rect) {
-      const { clientX, clientY } = e;
-      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
-        setIsDragging(false);
-      }
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      addVideosToPlaylist(files);
-    }
-  };
-
-  // 브라우저 기본 드래그 앤 드롭 동작 방지 및 파일 처리 (TEST 모드에서만)
-  useEffect(() => {
-    if (mode !== "random") return;
-
-    const handleDocumentDragOver = (e: DragEvent) => {
-      e.preventDefault();
-      // 드롭 존 위에 있으면 드래그 상태 표시
-      if (dropZoneRef.current) {
-        const rect = dropZoneRef.current.getBoundingClientRect();
-        const isOverDropZone = e.clientX >= rect.left && e.clientX <= rect.right &&
-                               e.clientY >= rect.top && e.clientY <= rect.bottom;
-        setIsDragging(isOverDropZone);
-      }
-    };
-
-    const handleDocumentDrop = (e: DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-
-      // 드롭 존 위에서 드롭된 경우에만 파일 처리
-      if (dropZoneRef.current && e.dataTransfer?.files) {
-        const rect = dropZoneRef.current.getBoundingClientRect();
-        const isOverDropZone = e.clientX >= rect.left && e.clientX <= rect.right &&
-                               e.clientY >= rect.top && e.clientY <= rect.bottom;
-        if (isOverDropZone && e.dataTransfer.files.length > 0) {
-          addVideosToPlaylist(e.dataTransfer.files);
-        }
-      }
-    };
-
-    const handleDocumentDragLeave = (e: DragEvent) => {
-      // 문서 밖으로 나가면 드래그 상태 해제
-      if (e.clientX <= 0 || e.clientY <= 0 ||
-          e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
-        setIsDragging(false);
-      }
-    };
-
-    document.addEventListener('dragover', handleDocumentDragOver);
-    document.addEventListener('drop', handleDocumentDrop);
-    document.addEventListener('dragleave', handleDocumentDragLeave);
-
-    return () => {
-      document.removeEventListener('dragover', handleDocumentDragOver);
-      document.removeEventListener('drop', handleDocumentDrop);
-      document.removeEventListener('dragleave', handleDocumentDragLeave);
-    };
-  }, [mode]);
-
-  // 슬롯 이름 불러오기 및 현재 텍스트와 일치하는 슬롯 찾기
-  useEffect(() => {
-    const savedNames: { [key: number]: string } = {};
-    for (let i = 1; i <= 20; i++) {
-      const name = localStorage.getItem(`slot_${i}_name`);
-      if (name) {
-        savedNames[i] = name;
-      }
-    }
-    setSlotNames(savedNames);
-
-    // 즐겨찾기 슬롯 불러오기
-    const savedFavorites = localStorage.getItem("favorite_slots");
-    if (savedFavorites) {
-      try {
-        const parsed = JSON.parse(savedFavorites);
-        setFavoriteSlots(new Set(parsed));
-      } catch {
-        // 파싱 실패 시 무시
-      }
-    }
-
-    // 현재 inputText와 일치하는 슬롯 찾기
-    for (let i = 1; i <= 20; i++) {
-      const slotContent = localStorage.getItem(`slot_${i}`);
-      if (slotContent && slotContent === inputText) {
-        setSelectedSlot(i);
-        break;
-      }
-    }
-  }, []);
-
-  // IndexedDB에서 재생목록 복원
-  useEffect(() => {
-    const restorePlaylist = async () => {
-      try {
-        const savedVideos = await loadVideosFromDB();
-        if (savedVideos.length > 0) {
-          const restoredPlaylist = savedVideos.map(v => {
-            const blob = new Blob([v.data], { type: 'video/mp4' });
-            return {
-              name: v.name,
-              url: URL.createObjectURL(blob),
-              data: v.data
-            };
-          });
-          setVideoPlaylist(restoredPlaylist);
-
-          // 저장된 인덱스 복원
-          const savedIndex = localStorage.getItem('videoCurrentIndex');
-          if (savedIndex !== null) {
-            const idx = parseInt(savedIndex);
-            if (idx >= 0 && idx < restoredPlaylist.length) {
-              setCurrentVideoIndex(idx);
-            }
-          }
-        }
-      } catch (e) {
-        console.error('재생목록 복원 실패:', e);
-      }
-    };
-    restorePlaylist();
-  }, []);
-
-  // 재생 위치 주기적 저장
-  useEffect(() => {
-    const saveInterval = setInterval(() => {
-      if (videoRef.current && !videoRef.current.paused) {
-        localStorage.setItem('videoCurrentTime', videoRef.current.currentTime.toString());
-        localStorage.setItem('videoCurrentIndex', currentVideoIndex.toString());
-      }
-    }, 1000);
-
-    return () => clearInterval(saveInterval);
-  }, [currentVideoIndex]);
-
-  // Microsoft Heami 음성 로드
-  useEffect(() => {
-    const loadHeami = () => {
-      const availableVoices = window.speechSynthesis.getVoices();
-      const heami = availableVoices.find(voice =>
-        voice.name.includes('Heami')
-      );
-      if (heami) {
-        setHeamiVoice(heami);
-      }
-    };
-
-    loadHeami();
-    window.speechSynthesis.onvoiceschanged = loadHeami;
-  }, []);
-
-  // 오늘 완료한 라운드 수 불러오기
-  useEffect(() => {
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const savedData = localStorage.getItem('completedRounds');
-    if (savedData) {
-      const parsed = JSON.parse(savedData);
-      if (parsed.date === today) {
-        setTodayCompletedRounds(parsed.count || 0);
-        setSlotCompletedRoundsNormal(parsed.normalSlotCounts || parsed.slotCounts || {});
-        setSlotCompletedRoundsBatch(parsed.batchSlotCounts || {});
-      } else {
-        // 날짜가 바뀌면 초기화
-        localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, normalSlotCounts: {}, batchSlotCounts: {} }));
-        setTodayCompletedRounds(0);
-        setSlotCompletedRoundsNormal({});
-        setSlotCompletedRoundsBatch({});
-      }
-    } else {
-      localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, normalSlotCounts: {}, batchSlotCounts: {} }));
-    }
-  }, []);
 
   // 저장된 상세설정 복원
   useEffect(() => {
@@ -594,43 +179,6 @@ export default function TypingPractice() {
     }
   }, []);
 
-  // 라운드 완료 카운트 증가
-  const incrementCompletedRounds = useCallback((slot: number | null, isBatch: boolean) => {
-    setTodayCompletedRounds(prev => {
-      const newCount = prev + 1;
-      // localStorage는 useEffect에서 처리
-      return newCount;
-    });
-
-    if (slot !== null) {
-      if (isBatch) {
-        setSlotCompletedRoundsBatch(prevSlots => {
-          const newSlotCounts = { ...prevSlots };
-          newSlotCounts[slot] = (newSlotCounts[slot] || 0) + 1;
-          return newSlotCounts;
-        });
-      } else {
-        setSlotCompletedRoundsNormal(prevSlots => {
-          const newSlotCounts = { ...prevSlots };
-          newSlotCounts[slot] = (newSlotCounts[slot] || 0) + 1;
-          return newSlotCounts;
-        });
-      }
-    }
-  }, []);
-
-  // localStorage에 완료 횟수 저장 (상태 변경 시)
-  useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    if (todayCompletedRounds > 0 || Object.keys(slotCompletedRoundsNormal).length > 0 || Object.keys(slotCompletedRoundsBatch).length > 0) {
-      localStorage.setItem('completedRounds', JSON.stringify({
-        date: today,
-        count: todayCompletedRounds,
-        normalSlotCounts: slotCompletedRoundsNormal,
-        batchSlotCounts: slotCompletedRoundsBatch
-      }));
-    }
-  }, [todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch]);
 
   // 단어/문장 모드 라운드 완료 감지
   useEffect(() => {
@@ -676,18 +224,6 @@ export default function TypingPractice() {
     }
   }, [progressCount, totalCount, mode, isPracticing]);
 
-  const clearAllTimeouts = () => {
-    timeoutIds.current.forEach(clearTimeout);
-    timeoutIds.current = [];
-  };
-
-  // 경과 시간을 "분:초.밀리초" 형태로 포맷팅 (밀리초 단위 입력)
-  const formatTime = (ms: number): string => {
-    const totalSeconds = ms / 1000;
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    return `${mins}:${secs.toFixed(3).padStart(6, '0')}`;
-  };
 
   // 카운트다운 시작 함수
   const startCountdown = (onComplete: () => void) => {
@@ -796,14 +332,7 @@ export default function TypingPractice() {
     updateTypedWord(""); // 타이핑 칸 초기화
     setPracticeText(""); // 연습 텍스트 초기화
     setShowResumeHighlight(false); // 하이라이트 초기화
-    // 매매치라 모드 초기화
-    setBatchStartIndex(0);
-    setCurrentBatchChars("");
-    // 복습 모드 초기화
-    setIsReviewMode(false);
-    setReviewBatches([]);
-    setReviewIndex(0);
-    setIsBatchReviewDone(false);
+    resetBatchAndReviewState();
     // 타수/자수 초기화
     setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
     setAllResults([]);
@@ -820,35 +349,6 @@ export default function TypingPractice() {
     });
   };
 
-  const speakText = (text: string, isSequential = false) => {
-    // 소리가 꺼져있으면 재생하지 않음
-    if (!isSoundEnabled) return;
-
-    if (!isSequential) {
-      // 기존 모드: 이전 음성 중단
-      window.speechSynthesis.cancel();
-      clearAllTimeouts();
-    }
-
-    // 텍스트를 통째로 재생 (Web Speech API가 자연스럽게 처리)
-    const utterance = new SpeechSynthesisUtterance(text);
-    // 보고치라 모드일 때는 자연스럽게 들리도록 적절한 속도로 재생
-    utterance.rate = isSequential ? sequentialSpeechRate : speechRate;
-    utterance.pitch = 1.2;
-    utterance.volume = 1.0;
-    if (heamiVoice) {
-      utterance.voice = heamiVoice;
-    }
-
-    if (isSequential) {
-      // 보고치라 모드: 즉시 재생 (딜레이 없음)
-      window.speechSynthesis.speak(utterance);
-    } else {
-      requestAnimationFrame(() => {
-        window.speechSynthesis.speak(utterance);
-      });
-    }
-  };
 
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) =>
     updateInputText(event.target.value);
@@ -894,7 +394,12 @@ export default function TypingPractice() {
           ? shuffledWords[currentWordIndex].trim()
           : null;
 
-    if (autoSubmitTarget && value.trim() === autoSubmitTarget && !isAutoSubmittingRef.current) {
+    const isMatch = autoSubmitTarget && !isAutoSubmittingRef.current && (
+      mode === "words"
+        ? value.replace(/\s+/g, '').endsWith(autoSubmitTarget.replace(/\s+/g, '')) && autoSubmitTarget.replace(/\s+/g, '').length > 0
+        : value.trim() === autoSubmitTarget
+    );
+    if (isMatch) {
       isAutoSubmittingRef.current = true;
       // 타수/자수 계산
       const elapsedMs = (currentWordStartTime && currentWordKeystrokes > 0) ? Date.now() - currentWordStartTime : 0;
@@ -1122,14 +627,7 @@ export default function TypingPractice() {
       setAccumulatedElapsedMs(0);
       setDisplayElapsedTime(0);
       resetCurrentWordTracking();
-      // 매매치라 모드 초기화
-      setBatchStartIndex(0);
-      setCurrentBatchChars("");
-      // 복습 모드 초기화
-      setIsReviewMode(false);
-      setReviewBatches([]);
-      setReviewIndex(0);
-      setIsBatchReviewDone(false);
+      resetBatchAndReviewState();
       // Google Sheets 세션 로깅
       if (allResults.length > 0) {
         const totalKpm = allResults.reduce((sum, r) => sum + r.kpm, 0);
@@ -1157,14 +655,7 @@ export default function TypingPractice() {
       if (words.length > 0) {
         // 이전 라운드 결과 초기화
         setRoundCompleteResult(null);
-        // 매매치라 모드 초기화
-        setBatchStartIndex(0);
-        setCurrentBatchChars("");
-        // 복습 모드 초기화
-        setIsReviewMode(false);
-        setReviewBatches([]);
-        setReviewIndex(0);
-        setIsBatchReviewDone(false);
+        resetBatchAndReviewState();
         // 연습 시작 시 현재 슬롯 저장
         setPracticeSlot(selectedSlot);
         // 드로어 닫기
@@ -1266,37 +757,6 @@ export default function TypingPractice() {
     }
   };
 
-  const handleRenameSlot = (slot: number) => {
-    const currentName = slotNames[slot] || `${slot}`;
-    const newName = prompt(`슬롯 ${slot}의 이름을 입력하세요:`, currentName);
-
-    if (newName !== null && newName.trim() !== "") {
-      localStorage.setItem(`slot_${slot}_name`, newName.trim());
-      setSlotNames(prev => ({ ...prev, [slot]: newName.trim() }));
-    }
-  };
-
-  const toggleFavoriteSlot = (slot: number) => {
-    setFavoriteSlots(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(slot)) {
-        newSet.delete(slot);
-      } else {
-        newSet.add(slot);
-      }
-      localStorage.setItem("favorite_slots", JSON.stringify([...newSet]));
-      return newSet;
-    });
-  };
-
-  const handleSaveToSlot = () => {
-    if (selectedSlot === null) {
-      alert("저장할 슬롯을 선택하세요");
-      return;
-    }
-    localStorage.setItem(`slot_${selectedSlot}`, inputText);
-    alert(`슬롯 ${selectedSlot}에 저장되었습니다`);
-  };
 
   const handleSaveDetailSettings = () => {
     const settings = {
@@ -1545,112 +1005,6 @@ export default function TypingPractice() {
   }, [currentDisplayIndex, isPracticing, isRoundComplete]);
 
 
-  // TEST 모드 동영상 단축키
-  useEffect(() => {
-    if (mode !== "random") return;
-
-    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
-      // 타이핑 영역에서는 단축키 무시 (textarea, input)
-      const target = e.target as HTMLElement;
-      if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") return;
-
-      const video = videoRef.current;
-      if (!video) return;
-
-      switch (e.key.toLowerCase()) {
-        case " ": // 스페이스: 재생/일시정지
-          e.preventDefault();
-          if (video.paused) video.play();
-          else video.pause();
-          break;
-        case "arrowleft": // 왼쪽: 뒤로 건너뛰기
-          e.preventDefault();
-          video.currentTime = Math.max(0, video.currentTime - skipSeconds);
-          break;
-        case "arrowright": // 오른쪽: 앞으로 건너뛰기
-          e.preventDefault();
-          video.currentTime = Math.min(video.duration, video.currentTime + skipSeconds);
-          break;
-        case "arrowup": // 위쪽: 볼륨 업
-          e.preventDefault();
-          const newVolUp = Math.min(1, videoVolume + 0.1);
-          setVideoVolume(newVolUp);
-          video.volume = newVolUp;
-          break;
-        case "arrowdown": // 아래쪽: 볼륨 다운
-          e.preventDefault();
-          const newVolDown = Math.max(0, videoVolume - 0.1);
-          setVideoVolume(newVolDown);
-          video.volume = newVolDown;
-          break;
-        case ",": // < : 속도 감소
-        case "<":
-          e.preventDefault();
-          const newRateDown = Math.max(0.25, videoPlaybackRate - 0.25);
-          setVideoPlaybackRate(newRateDown);
-          video.playbackRate = newRateDown;
-          break;
-        case ".": // > : 속도 증가
-        case ">":
-          e.preventDefault();
-          const newRateUp = Math.min(4, videoPlaybackRate + 0.25);
-          setVideoPlaybackRate(newRateUp);
-          video.playbackRate = newRateUp;
-          break;
-        case "l": // L: 반복 토글
-          e.preventDefault();
-          setVideoLoop(!videoLoop);
-          video.loop = !videoLoop;
-          break;
-        case "f": // F: 전체화면
-          e.preventDefault();
-          if (document.fullscreenElement) document.exitFullscreen();
-          else video.requestFullscreen();
-          break;
-        case "p": // P: PIP
-          e.preventDefault();
-          if (document.pictureInPictureEnabled) {
-            if (document.pictureInPictureElement) document.exitPictureInPicture();
-            else video.requestPictureInPicture();
-          }
-          break;
-        case "m": // M: 음소거 토글
-          e.preventDefault();
-          video.muted = !video.muted;
-          break;
-        case "home": // Home: 처음으로
-          e.preventDefault();
-          video.currentTime = 0;
-          break;
-        case "end": // End: 끝으로
-          e.preventDefault();
-          video.currentTime = video.duration;
-          break;
-        case "a": // A: A-B 구간 설정
-          e.preventDefault();
-          if (abRepeat.a === null) {
-            setAbRepeat({ a: video.currentTime, b: null });
-          } else if (abRepeat.b === null) {
-            setAbRepeat({ ...abRepeat, b: video.currentTime });
-          } else {
-            setAbRepeat({ a: null, b: null });
-          }
-          break;
-        case "n": // N: 다음 영상
-          e.preventDefault();
-          playNextVideo();
-          break;
-        case "b": // B: 이전 영상
-          e.preventDefault();
-          playPreviousVideo();
-          break;
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mode, videoVolume, videoPlaybackRate, videoLoop, skipSeconds, abRepeat, videoPlaylist.length, currentVideoIndex, playlistLoop]);
-
   // ESC 키로 연습 시작/종료
   const handleStartOrStopRef = useRef(handleStartOrStopPractice);
   handleStartOrStopRef.current = handleStartOrStopPractice;
@@ -1666,8 +1020,8 @@ export default function TypingPractice() {
     return () => window.removeEventListener("keydown", handleEsc);
   }, []);
 
-  // 평균 계산
-  const calculateAverage = () => {
+  // 평균 계산 (JSX에서 여러 번 참조되므로 useMemo로 1회만 계산)
+  const averageResult = useMemo(() => {
     if (allResults.length === 0) return { avgKpm: 0, avgCpm: 0, avgTime: 0 };
     const totalKpm = allResults.reduce((sum, result) => sum + result.kpm, 0);
     const totalCpm = allResults.reduce((sum, result) => sum + result.cpm, 0);
@@ -1677,7 +1031,7 @@ export default function TypingPractice() {
       avgCpm: Math.round(totalCpm / allResults.length),
       avgTime: Math.round(totalTime / allResults.length)
     };
-  };
+  }, [allResults]);
 
   // 윗칸에 표시된 글자
   const displayedText = useMemo((): string => {
@@ -1788,56 +1142,26 @@ export default function TypingPractice() {
     }
   };
 
-  // API 에러 발생 시 카운트다운 시작
-  const setGenerateErrorWithRetry = (error: string) => {
-    setGenerateError(error);
-    // 기존 타이머 정리
-    if (retryTimerRef.current) clearInterval(retryTimerRef.current);
-    // RPD(일일 한도) 에러면 카운트다운 없이 에러만 유지
-    const limitMatch = error.match(/limit:\s*(\d+)/);
-    const limit = limitMatch ? parseInt(limitMatch[1]) : 0;
-    if (limit >= 20) {
-      setRetryCountdown(0);
-      return;
-    }
-    // RPM 에러: retry 시간 파싱 후 카운트다운
-    const retryMatch = error.match(/retry in ([\d.]+)s/);
-    if (retryMatch) {
-      let seconds = Math.ceil(parseFloat(retryMatch[1]));
-      setRetryCountdown(seconds);
-      retryTimerRef.current = setInterval(() => {
-        seconds--;
-        if (seconds <= 0) {
-          if (retryTimerRef.current) clearInterval(retryTimerRef.current);
-          retryTimerRef.current = null;
-          setRetryCountdown(0);
-          setGenerateError(null);
-        } else {
-          setRetryCountdown(seconds);
-        }
-      }, 1000);
-    }
+
+  // 배치/복습 상태 초기화
+  const resetBatchAndReviewState = () => {
+    setBatchStartIndex(0);
+    setCurrentBatchChars("");
+    setIsReviewMode(false);
+    setReviewBatches([]);
+    setReviewIndex(0);
+    setIsBatchReviewDone(false);
   };
 
-  // API 에러 메시지를 한글로 변환
-  const getErrorMessage = (error: string): string => {
-    if (error.includes("429")) {
-      const limitMatch = error.match(/limit:\s*(\d+)/);
-      const limit = limitMatch ? parseInt(limitMatch[1]) : 0;
-      // limit: 20 = RPD(일일), limit: 5 = RPM(분당)
-      if (limit >= 20) {
-        return "일일 호출 한도 초과 (RPD 20회). 17:00 리셋까지 기다려주세요.";
-      }
-      if (retryCountdown > 0) {
-        return `분당 호출 한도 초과 (RPM). ${retryCountdown}초 후 다시 시도하세요.`;
-      }
-      return "호출 한도 초과. 잠시 후 다시 시도하세요.";
+  // 모드 전환 시 정리 (연습 중이면 중지 + 배치/복습 초기화 + UI 초기화)
+  const cleanupForModeSwitch = () => {
+    if (isPracticing || countdown !== null) {
+      stopPractice();
+      resetBatchAndReviewState();
+      setIsRoundComplete(false);
+      setCountdown(null);
+      setIsDrawerOpen(true);
     }
-    if (error.includes("503")) {
-      return "서버 과부하 상태입니다. 잠시 후 다시 시도하세요.";
-    }
-    if (error.includes("API 키")) return error;
-    return `오류: ${error}`;
   };
 
   // 문장모드 상태 복원 (문장모드로 돌아올 때)
@@ -1868,7 +1192,7 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
-              if (isPracticing || countdown !== null) { stopPractice(); setBatchStartIndex(0); setCurrentBatchChars(""); setIsReviewMode(false); setReviewBatches([]); setReviewIndex(0); setIsBatchReviewDone(false); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              cleanupForModeSwitch();
               switchMode("words");
             }}
           >
@@ -1879,7 +1203,7 @@ export default function TypingPractice() {
               mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
-              if (isPracticing || countdown !== null) { stopPractice(); setBatchStartIndex(0); setCurrentBatchChars(""); setIsReviewMode(false); setReviewBatches([]); setReviewIndex(0); setIsBatchReviewDone(false); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              cleanupForModeSwitch();
               switchMode("sentences");
               restoreSentenceState();
             }}
@@ -1892,7 +1216,7 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
-              if (isPracticing || countdown !== null) { stopPractice(); setBatchStartIndex(0); setCurrentBatchChars(""); setIsReviewMode(false); setReviewBatches([]); setReviewIndex(0); setIsBatchReviewDone(false); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              cleanupForModeSwitch();
               switchMode("longtext");
             }}
           >
@@ -1906,12 +1230,7 @@ export default function TypingPractice() {
               saveSentenceState();
               if (!isBatchMode || mode !== "sequential") {
                 stopPractice();
-                setBatchStartIndex(0);
-                setCurrentBatchChars("");
-                setIsReviewMode(false);
-                setReviewBatches([]);
-                setReviewIndex(0);
-                setIsBatchReviewDone(false);
+                resetBatchAndReviewState();
                 setIsRoundComplete(false);
               }
               switchMode("sequential");
@@ -1928,12 +1247,7 @@ export default function TypingPractice() {
               saveSentenceState();
               if (isBatchMode || mode !== "sequential") {
                 stopPractice();
-                setBatchStartIndex(0);
-                setCurrentBatchChars("");
-                setIsReviewMode(false);
-                setReviewBatches([]);
-                setReviewIndex(0);
-                setIsBatchReviewDone(false);
+                resetBatchAndReviewState();
                 setIsRoundComplete(false);
               }
               switchMode("sequential");
@@ -1948,7 +1262,7 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
-              if (isPracticing || countdown !== null) { stopPractice(); setBatchStartIndex(0); setCurrentBatchChars(""); setIsReviewMode(false); setReviewBatches([]); setReviewIndex(0); setIsBatchReviewDone(false); setIsRoundComplete(false); setCountdown(null); setIsDrawerOpen(true); }
+              cleanupForModeSwitch();
               switchMode("random");
             }}
           >
@@ -2088,7 +1402,7 @@ export default function TypingPractice() {
                       <div className="text-xs text-gray-500">
                         <p>오늘 API 호출: {apiCallCount}회 (매일 17:00 리셋)</p>
                         <div className="ml-2 mt-0.5 space-y-0">
-                          {["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-2.5-flash-preview-09-2025", "gemini-2.5-flash-lite", "gemini-2.5-flash-lite-preview-09-2025", "gemini-2.0-flash", "gemini-2.0-flash-lite"].map((model) => (
+                          {GEMINI_MODEL_NAMES.map((model) => (
                             <p key={model} className={apiCallModels[model] ? "text-gray-700" : "text-gray-300"}>
                               {model}: {apiCallModels[model] || 0}회
                             </p>
@@ -2424,7 +1738,7 @@ export default function TypingPractice() {
               )}
               {mode === "sentences" && !isPracticing && !isGenerating && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  {["랜덤 대화체", "뉴스/일상 대화체", "비즈니스 공문체", "학술/논문체", "소설/문학체", "법률/계약체", "의료/건강체", "IT/기술체", "스포츠 중계체", "요리/레시피체", "여행/관광체"].map((style) => (
+                  {SENTENCE_STYLES.map((style) => (
                     <button
                       key={style}
                       className={`px-2.5 py-1 text-xs rounded-full border transition ${
@@ -2485,8 +1799,8 @@ export default function TypingPractice() {
                       <span className="text-purple-600 font-semibold">자수: {lastResult.cpm}/분</span>
                       {allResults.length > 1 && (
                         <>
-                          <span className="text-gray-600">평균 타수: {calculateAverage().avgKpm}/분</span>
-                          <span className="text-gray-600">평균 자수: {calculateAverage().avgCpm}/분</span>
+                          <span className="text-gray-600">평균 타수: {averageResult.avgKpm}/분</span>
+                          <span className="text-gray-600">평균 자수: {averageResult.avgCpm}/분</span>
                         </>
                       )}
                       <span className="text-orange-600 font-semibold">시간: {formatTime(lastResult.elapsedTime)}</span>
@@ -2534,7 +1848,7 @@ export default function TypingPractice() {
           )}
 
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && isPracticing && (
-            <div className="flex items-center">
+            <div className={`flex items-center${mode === "words" ? " hidden" : ""}`}>
               <div className="flex flex-col space-y-1">
                 <div className="flex items-center space-x-4 text-sm font-medium">
                   <span className="text-green-600">타수: {lastResult.kpm}/분</span>
@@ -2543,8 +1857,8 @@ export default function TypingPractice() {
                 </div>
                 {allResults.length > 0 && allResults.length % 50 === 0 && (
                   <div className="flex items-center space-x-4 text-xs text-gray-600">
-                    <span>평균 타수: {calculateAverage().avgKpm}/분</span>
-                    <span>평균 자수: {calculateAverage().avgCpm}/분</span>
+                    <span>평균 타수: {averageResult.avgKpm}/분</span>
+                    <span>평균 자수: {averageResult.avgCpm}/분</span>
                   </div>
                 )}
               </div>
@@ -3134,6 +2448,18 @@ export default function TypingPractice() {
 
           {showText && mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <div className="min-h-[200px] p-4 border rounded bg-gray-50">
+              {mode === "words" && (
+                <div className="flex flex-col items-start gap-1 mb-2">
+                  {[-2, -1].map(offset => {
+                    const idx = currentWordIndex + offset;
+                    return idx >= 0 && shuffledWords[idx] ? (
+                      <span key={offset} className="text-gray-400" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px` }}>
+                        {shuffledWords[idx]}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              )}
               <p className="font-semibold whitespace-pre-wrap" style={{ fontSize: `${displayFontSize}px` }}>
                 {mode === "words"
                   ? shuffledWords[currentWordIndex]
@@ -3160,6 +2486,18 @@ export default function TypingPractice() {
                     })()
                   : ""}
               </p>
+              {mode === "words" && (
+                <div className="flex flex-col items-start gap-1 mt-2">
+                  {[1, 2].map(offset => {
+                    const idx = currentWordIndex + offset;
+                    return idx < shuffledWords.length && shuffledWords[idx] ? (
+                      <span key={offset} className="text-gray-400" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px` }}>
+                        {shuffledWords[idx]}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              )}
             </div>
           )}
 
