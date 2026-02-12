@@ -2,6 +2,7 @@ export async function generateSentencesStream(
   words: string[],
   count: number,
   apiKey: string,
+  style: string,
   onSentence: (sentence: string, index: number) => void,
   onDone: (total: number) => void | Promise<void>,
   onError: (error: string) => void,
@@ -11,7 +12,7 @@ export async function generateSentencesStream(
   const response = await fetch("/api/generate-sentences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ words, count, apiKey }),
+    body: JSON.stringify({ words, count, apiKey, style }),
     signal,
   });
 

@@ -78,6 +78,7 @@ type TryModelResult =
   | { status: "ok"; response: IncomingMessage; model: string }
   | { status: "rpm-limited" }
   | { status: "rpd-limited" }
+  | { status: "overloaded" }
   | { status: "error"; code: number; message: string };
 
 function tryGeminiModel(
@@ -111,6 +112,11 @@ function tryGeminiModel(
             const isRpm = errData.includes("minute") || errData.includes("per_minute");
             resolve(isRpm ? { status: "rpm-limited" } : { status: "rpd-limited" });
           });
+          return;
+        }
+        if (apiRes.statusCode === 503) {
+          apiRes.resume();
+          resolve({ status: "overloaded" });
           return;
         }
         if (apiRes.statusCode !== 200) {
@@ -164,10 +170,11 @@ export function claudePlugin(): Plugin {
           const body = await readBody(req);
 
           try {
-            const { words, count, apiKey } = JSON.parse(body) as {
+            const { words, count, apiKey, style } = JSON.parse(body) as {
               words: string[];
               count: number;
               apiKey: string;
+              style?: string;
             };
 
             if (!apiKey) {
@@ -184,9 +191,13 @@ export function claudePlugin(): Plugin {
               return;
             }
 
+            const styleInstruction = style === "랜덤 대화체"
+              ? "각 문장마다 뉴스/일상, 비즈니스 공문, 학술/논문, 소설/문학, 법률/계약, 의료/건강, IT/기술, 스포츠 중계, 요리/레시피, 여행/관광 등 다양한 대화체를 섞어서. 문장 뒤에 대화체 종류를 표시하지 마세요"
+              : `자연스러운 ${style || "뉴스/일상 대화체"}로`;
+
             const prompt = `정확히 ${count}개의 한국어 문장을 생성하세요.
 단어 목록: ${words.join(", ")}
-각 문장 20~50자, 자연스러운 뉴스/일상 대화체.
+각 문장 20~50자, ${styleInstruction}.
 
 중요: 각 문장 앞에 번호를 붙여서 진행 상황을 추적하세요.
 형식: ["1. 문장내용", "2. 문장내용", ..., "${count}. 문장내용"]
@@ -212,25 +223,15 @@ JSON 배열로만 응답하세요.`;
                 generationConfig,
               });
 
-              // RPM 재시도 루프 (최대 3회, 각 60초 대기)
-              let rpmRetries = 0;
-              const MAX_RPM_RETRIES = 3;
-
               while (true) {
                 const result = await tryGeminiModel(https, model.id, apiKey, requestBody);
 
                 if (result.status === "rpm-limited") {
-                  if (rpmRetries >= MAX_RPM_RETRIES) {
-                    break; // 이 모델 포기, 다음 모델로
-                  }
-                  if (!headersSent) {
-                    writeSSEHeaders(res);
-                    headersSent = true;
-                  }
-                  res.write(`data: ${JSON.stringify({ waiting: `${model.id} 분당 한도 도달, 60초 대기 중... (${rpmRetries + 1}/${MAX_RPM_RETRIES})` })}\n\n`);
-                  await new Promise(r => setTimeout(r, 60000));
-                  rpmRetries++;
-                  continue; // 같은 모델 재시도
+                  break; // 다음 모델로
+                }
+
+                if (result.status === "overloaded") {
+                  break; // 다음 모델로
                 }
 
                 if (result.status === "rpd-limited") {
