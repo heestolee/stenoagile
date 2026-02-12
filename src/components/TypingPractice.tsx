@@ -191,6 +191,7 @@ export default function TypingPractice() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
   const [aiModelName, setAiModelName] = useState("");
+  const [sentenceStyle, setSentenceStyle] = useState("뉴스/일상 대화체");
   const aiModelNameRef = useRef("");
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [retryCountdown, setRetryCountdown] = useState(0);
@@ -1212,6 +1213,7 @@ export default function TypingPractice() {
                 words,
                 batchCount,
                 geminiApiKey,
+                sentenceStyle,
                 (sentence, _index) => {
                   totalGenerated++;
                   setGeneratedCount(totalGenerated);
@@ -1831,6 +1833,9 @@ export default function TypingPractice() {
       }
       return "호출 한도 초과. 잠시 후 다시 시도하세요.";
     }
+    if (error.includes("503")) {
+      return "서버 과부하 상태입니다. 잠시 후 다시 시도하세요.";
+    }
     if (error.includes("API 키")) return error;
     return `오류: ${error}`;
   };
@@ -2400,14 +2405,38 @@ export default function TypingPractice() {
                   </span>
                 )}
                 {mode === "sentences" && generateError && (
-                  <span className="text-sm text-red-500 font-medium">
-                    {getErrorMessage(generateError)}
-                  </span>
+                  <div className="flex flex-col">
+                    <span className="text-sm text-red-500 font-medium">
+                      {getErrorMessage(generateError)}
+                    </span>
+                    {getErrorMessage(generateError) !== generateError && (
+                      <span className="text-xs text-gray-400">
+                        {generateError}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
               {mode === "sentences" && (isGenerating || (isPracticing && generatedCount > 0)) && (
                 <div className="text-xs text-gray-500 mt-1">
                   ({generatedCount}/{inputText.trim().split("/").filter(Boolean).length}){aiModelName ? ` [${aiModelName}]` : ""}
+                </div>
+              )}
+              {mode === "sentences" && !isPracticing && !isGenerating && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {["랜덤 대화체", "뉴스/일상 대화체", "비즈니스 공문체", "학술/논문체", "소설/문학체", "법률/계약체", "의료/건강체", "IT/기술체", "스포츠 중계체", "요리/레시피체", "여행/관광체"].map((style) => (
+                    <button
+                      key={style}
+                      className={`px-2.5 py-1 text-xs rounded-full border transition ${
+                        sentenceStyle === style
+                          ? "bg-blue-500 text-white border-blue-500"
+                          : "bg-white text-gray-600 border-gray-300 hover:border-blue-400 hover:text-blue-500"
+                      }`}
+                      onClick={() => setSentenceStyle(style)}
+                    >
+                      {style}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -3109,7 +3138,26 @@ export default function TypingPractice() {
                 {mode === "words"
                   ? shuffledWords[currentWordIndex]
                   : mode === "sentences"
-                  ? sentences[currentSentenceIndex]
+                  ? (() => {
+                      const target = sentences[currentSentenceIndex] || "";
+                      return target.split("").map((char, i) => {
+                        let style: React.CSSProperties = {};
+                        let displayChar = char;
+                        if (i < typedWord.length) {
+                          if (typedWord[i] === char) {
+                            style = { color: "blue" };
+                          } else {
+                            if (char === " ") {
+                              displayChar = "∨";
+                              style = { color: "red", fontSize: "0.8em" };
+                            } else {
+                              style = { color: "red", textDecoration: "underline" };
+                            }
+                          }
+                        }
+                        return <span key={i} style={style}>{displayChar}</span>;
+                      });
+                    })()
                   : ""}
               </p>
             </div>
