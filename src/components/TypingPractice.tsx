@@ -10,6 +10,9 @@ import { useVideoPlayer } from "../hooks/useVideoPlayer";
 import { useHeamiVoice } from "../hooks/useHeamiVoice";
 import { useAIGeneration } from "../hooks/useAIGeneration";
 import { useSlotManager } from "../hooks/useSlotManager";
+import { useWordReview } from "../hooks/useWordReview";
+import { useWordProficiency } from "../hooks/useWordProficiency";
+import WordProficiencyPanel from "./WordProficiencyPanel";
 
 // 경과 시간을 "분:초.밀리초" 형태로 포맷팅 (밀리초 단위 입력)
 const formatTime = (ms: number): string => {
@@ -88,6 +91,7 @@ export default function TypingPractice() {
   const [accumulatedElapsedMs, setAccumulatedElapsedMs] = useState(0); // 누적 경과 시간
   const [displayElapsedTime, setDisplayElapsedTime] = useState(0); // 실시간 표시용 경과 시간
   const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // 타이핑 칸 참조
+  const wordInputRef = useRef<HTMLInputElement | null>(null); // 단어/문장 모드 입력 칸 참조
   const isAutoSubmittingRef = useRef(false); // 자동 제출 중복 방지
   const displayAreaRef = useRef<HTMLDivElement | null>(null); // 원문 표시 영역 참조
 
@@ -102,6 +106,44 @@ export default function TypingPractice() {
   const [reviewBatches, setReviewBatches] = useState<string[]>([]); // 복습할 배치 목록
   const [reviewIndex, setReviewIndex] = useState(0); // 현재 복습 중인 인덱스
   const [isBatchReviewDone, setIsBatchReviewDone] = useState(false); // 복습까지 완전히 끝났는지
+
+  // 단어모드 오답 자동복습 훅
+  const {
+    isReviewActive, reviewWords, currentReviewIndex, currentReviewTarget,
+    reviewType, checkAndStartReview, startFailedReview, handleReviewSubmit, resetReview,
+  } = useWordReview();
+
+  // 단어 숙련도 추적 훅
+  const {
+    todayProficiencies, overallProficiencies, recordResult,
+    refreshToday, refreshOverall, clearToday, clearOverall, mergeToOverall,
+  } = useWordProficiency();
+  const [showProficiencyPanel, setShowProficiencyPanel] = useState(false);
+  const [reviewFailedWords, setReviewFailedWords] = useState<{ word: string; typed: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('reviewFailedWords');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    localStorage.setItem('reviewFailedWords', JSON.stringify(reviewFailedWords));
+  }, [reviewFailedWords]);
+
+  const prevReviewActiveRef = useRef(false);
+  const prevReviewTypeRef = useRef<string | null>(null);
+
+  // 1차 복습 끝나면 오답노트 자동 복습 (1회만)
+  useEffect(() => {
+    const wasActive = prevReviewActiveRef.current;
+    const wasType = prevReviewTypeRef.current;
+    prevReviewActiveRef.current = isReviewActive;
+    prevReviewTypeRef.current = reviewType;
+
+    // 1차 복습이 방금 끝났을 때만 2차 시작
+    if (wasActive && !isReviewActive && wasType === "primary" && reviewFailedWords.length > 0) {
+      startFailedReview(reviewFailedWords);
+    }
+  }, [isReviewActive, reviewType, reviewFailedWords, startFailedReview]);
 
   // 비디오 플레이어 훅
   const {
@@ -182,6 +224,8 @@ export default function TypingPractice() {
 
   // 단어/문장 모드 라운드 완료 감지
   useEffect(() => {
+    // 복습 중에는 라운드 완료 방지
+    if (isReviewActive) return;
     if (
       (mode === "words" || mode === "sentences") &&
       isPracticing &&
@@ -219,10 +263,11 @@ export default function TypingPractice() {
       }
       // 연습 종료 + 드로어 열기 + 라운드 카운트 증가
       stopPractice();
+      resetReview();
       setIsDrawerOpen(true);
       incrementCompletedRounds(practiceSlot, false);
     }
-  }, [progressCount, totalCount, mode, isPracticing]);
+  }, [progressCount, totalCount, mode, isPracticing, isReviewActive]);
 
 
   // 카운트다운 시작 함수
@@ -387,15 +432,18 @@ export default function TypingPractice() {
     updateTypedWord(value);
 
     // 단어/문장 모드: 입력값이 정답과 일치하면 자동 제출
+    // 복습 중이면 복습 단어를 타겟으로 사용
     const autoSubmitTarget =
-      mode === "sentences" && isPracticing && sentences[currentSentenceIndex]
-        ? sentences[currentSentenceIndex].trim()
-        : mode === "words" && isPracticing && shuffledWords[currentWordIndex]
-          ? shuffledWords[currentWordIndex].trim()
-          : null;
+      isReviewActive && currentReviewTarget
+        ? currentReviewTarget.trim()
+        : mode === "sentences" && isPracticing && sentences[currentSentenceIndex]
+          ? sentences[currentSentenceIndex].trim()
+          : mode === "words" && isPracticing && shuffledWords[currentWordIndex]
+            ? shuffledWords[currentWordIndex].trim()
+            : null;
 
     const isMatch = autoSubmitTarget && !isAutoSubmittingRef.current && (
-      mode === "words"
+      mode === "words" || isReviewActive
         ? value.replace(/\s+/g, '').endsWith(autoSubmitTarget.replace(/\s+/g, '')) && autoSubmitTarget.replace(/\s+/g, '').length > 0
         : value.trim() === autoSubmitTarget
     );
@@ -412,7 +460,33 @@ export default function TypingPractice() {
         setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
         logResult({ mode, kpm, cpm, elapsedTime: elapsedMs });
       }
-      submitAnswer(value);
+      if (isReviewActive) {
+        // 복습 모드: 복습 제출 + 숙련도 기록
+        const reviewTarget = autoSubmitTarget;
+        const reviewCorrect = handleReviewSubmit(value);
+        recordResult(reviewTarget, reviewCorrect);
+        if (!reviewCorrect && reviewType === "primary") {
+          setReviewFailedWords(prev => [...prev, { word: reviewTarget, typed: value.trim() }]);
+        }
+        if (reviewCorrect && reviewType === "failed") {
+          setReviewFailedWords(prev => prev.filter(item => item.word !== reviewTarget));
+        }
+        updateTypedWord("");
+      } else {
+        // 일반 모드: 제출 + 숙련도 기록 + 복습 체크
+        const target = mode === "words" ? shuffledWords[currentWordIndex] : autoSubmitTarget;
+        const targetClean = target.replace(/\s+/g, '');
+        const inputClean = value.replace(/\s+/g, '');
+        const isCorrect = mode === "words"
+          ? inputClean.endsWith(targetClean) && targetClean.length > 0
+          : value.trim() === autoSubmitTarget;
+        submitAnswer(value);
+        if (mode === "words") {
+          recordResult(targetClean, isCorrect);
+          const nextProgress = progressCount + 1;
+          checkAndStartReview(nextProgress, isCorrect ? incorrectWords : [...incorrectWords, { word: targetClean, typed: value.trim() }], totalCount);
+        }
+      }
       resetCurrentWordTracking();
       // IME의 후속 onChange 이벤트가 중복 제출하지 않도록 잠시 가드
       setTimeout(() => { isAutoSubmittingRef.current = false; }, 50);
@@ -458,6 +532,7 @@ export default function TypingPractice() {
                 });
               } else {
                 startPractice(words);
+                setTimeout(() => wordInputRef.current?.focus(), 50);
               }
             }
           }
@@ -564,7 +639,41 @@ export default function TypingPractice() {
         }
       }
 
+      // 복습 중 + 단어모드 → 복습 제출
+      if (isReviewActive && mode === "words") {
+        const reviewTarget = currentReviewTarget?.replace(/\s+/g, '') || '';
+        const reviewCorrect = handleReviewSubmit(typedWord);
+        if (reviewTarget) {
+          recordResult(reviewTarget, reviewCorrect);
+          if (!reviewCorrect && reviewType === "primary") {
+            setReviewFailedWords(prev => [...prev, { word: reviewTarget, typed: typedWord.trim() }]);
+          }
+          if (reviewCorrect && reviewType === "failed") {
+            setReviewFailedWords(prev => prev.filter(item => item.word !== reviewTarget));
+          }
+        }
+        resetCurrentWordTracking();
+        updateTypedWord("");
+        return;
+      }
+
+      // 일반 제출
+      if (mode === "words") {
+        const target = shuffledWords[currentWordIndex];
+        const targetClean = target.replace(/\s+/g, '');
+        const inputClean = typedWord.replace(/\s+/g, '');
+        const isCorrect = inputClean.endsWith(targetClean) && targetClean.length > 0;
+        recordResult(targetClean, isCorrect);
+      }
       submitAnswer(typedWord);
+      if (mode === "words") {
+        const nextProgress = progressCount + 1;
+        const target = shuffledWords[currentWordIndex];
+        const targetClean = target.replace(/\s+/g, '');
+        const inputClean = typedWord.replace(/\s+/g, '');
+        const isCorrect = inputClean.endsWith(targetClean) && targetClean.length > 0;
+        checkAndStartReview(nextProgress, isCorrect ? incorrectWords : [...incorrectWords, { word: targetClean, typed: typedWord.trim() }], totalCount);
+      }
       resetCurrentWordTracking(); // 다음 단어를 위해 리셋
       return;
     }
@@ -646,6 +755,7 @@ export default function TypingPractice() {
         });
       }
       stopPractice();
+      resetReview();
       // 드로어 열기
       setIsDrawerOpen(true);
       // 타이핑칸에 포커스
@@ -752,6 +862,7 @@ export default function TypingPractice() {
         } else {
           // 단어 모드
           startPractice(words);
+          setTimeout(() => wordInputRef.current?.focus(), 50);
         }
       }
     }
@@ -1155,8 +1266,10 @@ export default function TypingPractice() {
 
   // 모드 전환 시 정리 (연습 중이면 중지 + 배치/복습 초기화 + UI 초기화)
   const cleanupForModeSwitch = () => {
+    setRoundCompleteResult(null);
     if (isPracticing || countdown !== null) {
       stopPractice();
+      resetReview();
       resetBatchAndReviewState();
       setIsRoundComplete(false);
       setCountdown(null);
@@ -1230,6 +1343,7 @@ export default function TypingPractice() {
               saveSentenceState();
               if (!isBatchMode || mode !== "sequential") {
                 stopPractice();
+      resetReview();
                 resetBatchAndReviewState();
                 setIsRoundComplete(false);
               }
@@ -1247,6 +1361,7 @@ export default function TypingPractice() {
               saveSentenceState();
               if (isBatchMode || mode !== "sequential") {
                 stopPractice();
+      resetReview();
                 resetBatchAndReviewState();
                 setIsRoundComplete(false);
               }
@@ -1279,10 +1394,14 @@ export default function TypingPractice() {
             {mode !== "random" && (
               <div className="space-y-2">
                 <div className="grid grid-cols-5 gap-1">
-                  {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
+                  {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => {
+                    const name = slotNames[num] || `${num}`;
+                    const len = name.length;
+                    const fontSize = len <= 2 ? 'text-sm' : len <= 4 ? 'text-xs' : 'text-[10px]';
+                    return (
                     <button
                       key={num}
-                      className={`px-2 py-1 rounded text-sm relative ${
+                      className={`px-1 py-1 rounded relative overflow-hidden ${fontSize} leading-tight ${
                         selectedSlot === num
                           ? "bg-blue-500 text-white"
                           : favoriteSlots.has(num)
@@ -1303,9 +1422,10 @@ export default function TypingPractice() {
                       title="클릭: 불러오기 | Shift+클릭: 즐겨찾기 | 우클릭: 이름 변경"
                     >
                       {favoriteSlots.has(num) && <span className="absolute -top-1 -right-1 text-xs">⭐</span>}
-                      {slotNames[num] || num}
+                      <span className="block w-full text-center break-all">{name}</span>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
                 <button
                   className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 w-full"
@@ -1848,14 +1968,14 @@ export default function TypingPractice() {
           )}
 
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && isPracticing && (
-            <div className={`flex items-center${mode === "words" ? " hidden" : ""}`}>
+            <div className="flex items-center">
               <div className="flex flex-col space-y-1">
                 <div className="flex items-center space-x-4 text-sm font-medium">
-                  <span className="text-green-600">타수: {lastResult.kpm}/분</span>
-                  <span className="text-purple-600">자수: {lastResult.cpm}/분</span>
+                  {mode !== "words" && <span className="text-green-600">타수: {lastResult.kpm}/분</span>}
+                  {mode !== "words" && <span className="text-purple-600">자수: {lastResult.cpm}/분</span>}
                   <span className="text-orange-600">시간: {formatTime(displayElapsedTime)}</span>
                 </div>
-                {allResults.length > 0 && allResults.length % 50 === 0 && (
+                {mode !== "words" && allResults.length > 0 && allResults.length % 50 === 0 && (
                   <div className="flex items-center space-x-4 text-xs text-gray-600">
                     <span>평균 타수: {averageResult.avgKpm}/분</span>
                     <span>평균 자수: {averageResult.avgCpm}/분</span>
@@ -2448,7 +2568,7 @@ export default function TypingPractice() {
 
           {showText && mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <div className="min-h-[200px] p-4 border rounded bg-gray-50">
-              {mode === "words" && (
+              {mode === "words" && !isReviewActive && (
                 <div className="flex flex-col items-start gap-1 mb-2">
                   {[-2, -1].map(offset => {
                     const idx = currentWordIndex + offset;
@@ -2460,9 +2580,14 @@ export default function TypingPractice() {
                   })}
                 </div>
               )}
+              {isReviewActive && mode === "words" && (
+                <div className="mb-2 text-sm font-bold text-orange-600">
+                  {reviewType === "failed" ? "2차복습" : "1차복습"} {currentReviewIndex + 1}/{reviewWords.length}
+                </div>
+              )}
               <p className="font-semibold whitespace-pre-wrap" style={{ fontSize: `${displayFontSize}px` }}>
                 {mode === "words"
-                  ? shuffledWords[currentWordIndex]
+                  ? (isReviewActive && currentReviewTarget ? currentReviewTarget : shuffledWords[currentWordIndex])
                   : mode === "sentences"
                   ? (() => {
                       const target = sentences[currentSentenceIndex] || "";
@@ -2486,7 +2611,7 @@ export default function TypingPractice() {
                     })()
                   : ""}
               </p>
-              {mode === "words" && (
+              {mode === "words" && !isReviewActive && (
                 <div className="flex flex-col items-start gap-1 mt-2">
                   {[1, 2].map(offset => {
                     const idx = currentWordIndex + offset;
@@ -2504,7 +2629,8 @@ export default function TypingPractice() {
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <>
               <input
-                key={mode === "sentences" ? currentSentenceIndex : currentWordIndex}
+                ref={wordInputRef}
+                key={`${mode === "sentences" ? currentSentenceIndex : currentWordIndex}-${isReviewActive ? `r${currentReviewIndex}` : ''}`}
                 autoFocus
                 type="text"
                 className="w-full p-2 border rounded"
@@ -2517,28 +2643,80 @@ export default function TypingPractice() {
                 <span className="text-blue-600">정답: {correctCount}</span> |{" "}
                 <span className="text-rose-600">오답: {incorrectCount}</span> |
                 진행: {progressCount} / {mode === "sentences" && generatedCount > 0 ? generatedCount : totalCount}
+                {isReviewActive && mode === "words" && (
+                  <> | <span className={`font-bold ${reviewType === "failed" ? "text-amber-700" : "text-orange-600"}`}>{reviewType === "failed" ? "2차복습" : "1차복습"}: {currentReviewIndex + 1}/{reviewWords.length}</span></>
+                )}
               </p>
 
-              <div>
-                <h2 className="text-xl font-semibold mb-2">오답 노트</h2>
-                <div className="h-[500px] overflow-y-scroll border rounded p-2">
-                  <ul className="space-y-1 text-sm">
-                    {incorrectWords.map((item) => (
-                      <li
-                        key={`${item.word}-${item.typed}`}
-                        className="text-rose-600 flex items-center gap-2"
-                      >
-                        <button
-                          className="bg-stone-500 text-white rounded px-2 py-0.5 text-sm"
-                          onClick={() => removeIncorrectWord(item.word, item.typed)}
-                        >
-                          &times;
-                        </button>
-                        {item.word} → {item.typed}
-                      </li>
-                    ))}
-                  </ul>
+              {mode === "words" && (
+                <div className="flex gap-2 mt-1">
+                  <button
+                    onClick={() => { const next = !showProficiencyPanel; setShowProficiencyPanel(next); if (next) { refreshToday(); refreshOverall(); } }}
+                    className={`text-xs px-3 py-1 rounded border ${showProficiencyPanel ? 'bg-blue-500 text-white border-blue-500' : 'bg-white border-gray-300 hover:bg-gray-100'}`}
+                  >
+                    숙련도
+                  </button>
                 </div>
+              )}
+
+              {showProficiencyPanel && mode === "words" && (
+                <WordProficiencyPanel
+                  todayProficiencies={todayProficiencies}
+                  overallProficiencies={overallProficiencies}
+                  onRefreshToday={refreshToday}
+                  onRefreshOverall={refreshOverall}
+                  onClearToday={clearToday}
+                  onClearOverall={clearOverall}
+                  onMergeToOverall={mergeToOverall}
+                  onClose={() => setShowProficiencyPanel(false)}
+                />
+              )}
+
+              <div className={`grid gap-4 ${mode === "words" ? "grid-cols-2" : "grid-cols-1"}`}>
+                <div>
+                  <h2 className="text-xl font-semibold mb-2">{mode === "words" ? "복습단어 (1차복습)" : "오답 노트"}</h2>
+                  <div className="h-[500px] overflow-y-scroll border rounded p-2">
+                    <ul className="space-y-1 text-sm">
+                      {incorrectWords.map((item) => (
+                        <li
+                          key={`${item.word}-${item.typed}`}
+                          className="text-rose-600 flex items-center gap-2"
+                        >
+                          <button
+                            className="bg-stone-500 text-white rounded px-2 py-0.5 text-sm"
+                            onClick={() => removeIncorrectWord(item.word, item.typed)}
+                          >
+                            &times;
+                          </button>
+                          {item.word} → {item.typed}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                {mode === "words" && (
+                  <div>
+                    <h2 className="text-xl font-semibold mb-2 text-amber-700">오답노트 (2차복습)</h2>
+                    <div className="h-[500px] overflow-y-scroll border border-amber-300 rounded p-2 bg-amber-50">
+                      <ul className="space-y-1 text-sm">
+                        {reviewFailedWords.map((item, i) => (
+                          <li
+                            key={`${item.word}-${item.typed}-${i}`}
+                            className="text-amber-700 flex items-center gap-2"
+                          >
+                            <button
+                              className="bg-amber-500 text-white rounded px-2 py-0.5 text-sm"
+                              onClick={() => setReviewFailedWords(prev => prev.filter((_, idx) => idx !== i))}
+                            >
+                              &times;
+                            </button>
+                            {item.word} → {item.typed}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
