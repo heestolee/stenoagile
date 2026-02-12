@@ -64,7 +64,6 @@ export function useWordReview() {
 
       const nextIndex = currentReviewIndex + 1;
       if (nextIndex >= reviewWords.length) {
-        const completedType = reviewType;
         setIsReviewActive(false);
         setReviewWords([]);
         setCurrentReviewIndex(0);
