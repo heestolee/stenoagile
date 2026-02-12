@@ -5,7 +5,7 @@ export function useAIGeneration() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
   const [aiModelName, setAiModelName] = useState("");
-  const [sentenceStyle, setSentenceStyle] = useState("뉴스/일상 대화체");
+  const [sentenceStyle, setSentenceStyle] = useState("랜덤 대화체");
   const aiModelNameRef = useRef("");
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [retryCountdown, setRetryCountdown] = useState(0);

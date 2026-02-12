@@ -1388,20 +1388,20 @@ export default function TypingPractice() {
 
       <div className="flex flex-row gap-0">
         {/* 드로어 */}
-        <div className={`transition-all duration-300 overflow-hidden flex-shrink-0 ${isDrawerOpen ? "w-80" : "w-0"}`}>
-          <div className="w-80 space-y-4 pr-4">
+        <div className={`transition-all duration-300 overflow-hidden flex-shrink-0 ${isDrawerOpen ? "w-96" : "w-0"}`}>
+          <div className="w-96 space-y-4 pr-4">
             {/* 슬롯 버튼 (words/sentences 모드) */}
             {mode !== "random" && (
               <div className="space-y-2">
-                <div className="grid grid-cols-5 gap-1">
+                <div className="grid grid-cols-4 gap-1.5">
                   {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => {
                     const name = slotNames[num] || `${num}`;
                     const len = name.length;
-                    const fontSize = len <= 2 ? 'text-sm' : len <= 4 ? 'text-xs' : 'text-[10px]';
+                    const fontSize = len <= 3 ? 'text-sm' : len <= 6 ? 'text-xs' : 'text-[10px]';
                     return (
                     <button
                       key={num}
-                      className={`px-1 py-1 rounded relative overflow-hidden ${fontSize} leading-tight ${
+                      className={`h-8 rounded relative overflow-hidden ${fontSize} leading-tight ${
                         selectedSlot === num
                           ? "bg-blue-500 text-white"
                           : favoriteSlots.has(num)
@@ -1422,7 +1422,7 @@ export default function TypingPractice() {
                       title="클릭: 불러오기 | Shift+클릭: 즐겨찾기 | 우클릭: 이름 변경"
                     >
                       {favoriteSlots.has(num) && <span className="absolute -top-1 -right-1 text-xs">⭐</span>}
-                      <span className="block w-full text-center break-all">{name}</span>
+                      <span className="block w-full text-center truncate px-1">{name}</span>
                     </button>
                     );
                   })}
