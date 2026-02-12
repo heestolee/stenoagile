@@ -101,10 +101,10 @@ export function useSlotManager(inputText: string) {
 
   const handleRenameSlot = (slot: number) => {
     const currentName = slotNames[slot] || `${slot}`;
-    const newName = prompt(`슬롯 ${slot}의 이름을 입력하세요 (최대 10글자):`, currentName);
+    const newName = prompt(`슬롯 ${slot}의 이름을 입력하세요 (최대 7글자):`, currentName);
 
     if (newName !== null && newName.trim() !== "") {
-      const trimmed = newName.trim().slice(0, 10);
+      const trimmed = newName.trim().slice(0, 7);
       localStorage.setItem(`slot_${slot}_name`, trimmed);
       setSlotNames(prev => ({ ...prev, [slot]: trimmed }));
     }
