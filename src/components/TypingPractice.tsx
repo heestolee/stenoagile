@@ -1,4 +1,4 @@
-//테스트용 주석 추가
+﻿//테스트용 주석 추가
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useMemo } from "react";
 import { useTypingStore } from "../store/useTypingStore";
 import { savedText1, savedText2, savedText5 } from "../constants";
@@ -14,12 +14,125 @@ import { useWordReview } from "../hooks/useWordReview";
 import { useWordProficiency } from "../hooks/useWordProficiency";
 import WordProficiencyPanel from "./WordProficiencyPanel";
 
+type PositionKeyDef = { id: string; label: string };
+const POSITION_LEFT_ROWS: PositionKeyDef[][] = [
+  [{ id: "L_CH", label: "ㅊ" }, { id: "L_T", label: "ㅌ" }, { id: "L_K", label: "ㅋ" }, { id: "L_B", label: "ㅂ" }, { id: "L_P", label: "ㅍ" }],
+  [{ id: "L_S", label: "ㅅ" }, { id: "L_D", label: "ㄷ" }, { id: "L_J", label: "ㅈ" }, { id: "L_G", label: "ㄱ" }, { id: "L_G2", label: "(ㅋ)" }],
+  [{ id: "L_M", label: "ㅁ" }, { id: "L_R", label: "ㄹ" }, { id: "L_N", label: "ㄴ" }, { id: "L_H", label: "ㅎ" }, { id: "L_NG", label: "ㅢ" }],
+];
+const POSITION_RIGHT_ROWS: PositionKeyDef[][] = [
+  [{ id: "R_GG", label: "ㄲ" }, { id: "R_H", label: "ㅎ" }, { id: "R_T", label: "ㅌ" }, { id: "R_CH", label: "ㅊ" }, { id: "R_P", label: "ㅍ" }],
+  [{ id: "R_G", label: "ㄱ" }, { id: "R_N", label: "ㄴ" }, { id: "R_R", label: "ㄹ" }, { id: "R_S", label: "ㅅ" }, { id: "R_B", label: "ㅂ" }],
+  [{ id: "R_SS", label: "ㅆ" }, { id: "R_NG", label: "ㅇ" }, { id: "R_M", label: "ㅁ" }, { id: "R_D", label: "ㄷ" }, { id: "R_J", label: "ㅈ" }],
+];
+const POSITION_THUMB_ROW: PositionKeyDef[] = [
+  { id: "V_O", label: "ㅗ" }, { id: "V_A", label: "ㅏ" }, { id: "V_U", label: "ㅜ" },
+  { id: "V_EU", label: "ㅡ" }, { id: "V_EO", label: "ㅓ" }, { id: "V_I", label: "ㅣ" },
+];
+
+const CHOSEONG_LIST = ["ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅉ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
+const JUNGSEONG_LIST = ["ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ", "ㅕ", "ㅖ", "ㅗ", "ㅘ", "ㅙ", "ㅚ", "ㅛ", "ㅜ", "ㅝ", "ㅞ", "ㅟ", "ㅠ", "ㅡ", "ㅢ", "ㅣ"];
+const JONGSEONG_LIST = ["", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
+const POSITION_INITIAL_MAP: Record<string, string[]> = {
+  "ㄱ": ["L_G"], "ㄲ": ["L_G2"], "ㄴ": ["L_N"], "ㄷ": ["L_D"], "ㄸ": ["L_D"], "ㄹ": ["L_R"], "ㅁ": ["L_M"],
+  "ㅂ": ["L_B"], "ㅃ": ["L_B"], "ㅅ": ["L_S"], "ㅆ": ["L_S"], "ㅇ": ["L_NG"], "ㅈ": ["L_J"], "ㅉ": ["L_J"],
+  "ㅊ": ["L_CH"], "ㅋ": ["L_K"], "ㅌ": ["L_T"], "ㅍ": ["L_P"], "ㅎ": ["L_H"],
+};
+const POSITION_FINAL_MAP: Record<string, string[]> = {
+  "ㄱ": ["R_G"], "ㄲ": ["R_GG"], "ㄳ": ["R_G", "R_S"], "ㄴ": ["R_N"], "ㄵ": ["R_N", "R_J"], "ㄶ": ["R_N", "R_H"],
+  "ㄷ": ["R_D"], "ㄹ": ["R_R"], "ㄺ": ["R_R", "R_G"], "ㄻ": ["R_R", "R_M"], "ㄼ": ["R_R", "R_B"], "ㄽ": ["R_R", "R_S"],
+  "ㄾ": ["R_R", "R_T"], "ㄿ": ["R_R", "R_P"], "ㅀ": ["R_R", "R_H"], "ㅁ": ["R_M"], "ㅂ": ["R_B"], "ㅄ": ["R_B", "R_S"],
+  "ㅅ": ["R_S"], "ㅆ": ["R_SS"], "ㅇ": ["R_NG"], "ㅈ": ["R_J"], "ㅊ": ["R_CH"], "ㅋ": ["R_G"], "ㅌ": ["R_T"], "ㅍ": ["R_P"], "ㅎ": ["R_H"],
+};
+const POSITION_VOWEL_MAP: Record<string, string[]> = {
+  "ㅏ": ["V_A"], "ㅐ": ["V_A", "V_I"], "ㅑ": ["V_A"], "ㅒ": ["V_A", "V_I"], "ㅓ": ["V_EO"], "ㅔ": ["V_EO", "V_I"],
+  "ㅕ": ["V_EO"], "ㅖ": ["V_EO", "V_I"], "ㅗ": ["V_O"], "ㅘ": ["V_O", "V_A"], "ㅙ": ["V_O", "V_A", "V_I"],
+  "ㅚ": ["V_O", "V_I"], "ㅛ": ["V_O"], "ㅜ": ["V_U"], "ㅝ": ["V_U", "V_EO"], "ㅞ": ["V_U", "V_EO", "V_I"],
+  "ㅟ": ["V_U", "V_I"], "ㅠ": ["V_U"], "ㅡ": ["V_EU"], "ㅢ": ["V_EU", "V_I"], "ㅣ": ["V_I"],
+};
+const POSITION_KEY_LABEL: Record<string, string> = {
+  L_CH: "ㅊ", L_T: "ㅌ", L_K: "ㅋ", L_B: "ㅂ", L_P: "ㅍ",
+  L_S: "ㅅ", L_D: "ㄷ", L_J: "ㅈ", L_G: "ㄱ", L_G2: "(ㅋ)",
+  L_M: "ㅁ", L_R: "ㄹ", L_N: "ㄴ", L_H: "ㅎ", L_NG: "ㅢ",
+  R_GG: "ㄲ", R_H: "ㅎ", R_T: "ㅌ", R_CH: "ㅊ", R_P: "ㅍ",
+  R_G: "ㄱ", R_N: "ㄴ", R_R: "ㄹ", R_S: "ㅅ", R_B: "ㅂ",
+  R_SS: "ㅆ", R_NG: "ㅇ", R_M: "ㅁ", R_D: "ㄷ", R_J: "ㅈ",
+  V_O: "ㅗ", V_A: "ㅏ", V_U: "ㅜ", V_EU: "ㅡ", V_EO: "ㅓ", V_I: "ㅣ",
+};
+type PositionKeyRole = "initial" | "vowel_left_thumb" | "vowel_right_thumb" | "final";
+const getPositionKeyRole = (id: string): PositionKeyRole => {
+  if (id.startsWith("L_")) return "initial";
+  if (id.startsWith("R_")) return "final";
+  if (id === "V_O" || id === "V_A" || id === "V_U") return "vowel_left_thumb";
+  return "vowel_right_thumb";
+};
+type PositionRoleGroup = "initial" | "vowel" | "final";
+const getPositionRoleGroup = (role: PositionKeyRole): PositionRoleGroup =>
+  role === "initial" ? "initial" : role === "final" ? "final" : "vowel";
+const getPositionRoleColorClass = (role: PositionKeyRole): string =>
+  role === "initial"
+    ? "text-white bg-blue-600 border-blue-700"
+    : role === "final"
+      ? "text-white bg-rose-600 border-rose-700"
+      : "text-white bg-emerald-600 border-emerald-700";
+
 // 경과 시간을 "분:초.밀리초" 형태로 포맷팅 (밀리초 단위 입력)
 const formatTime = (ms: number): string => {
   const totalSeconds = ms / 1000;
   const mins = Math.floor(totalSeconds / 60);
   const secs = totalSeconds % 60;
   return `${mins}:${secs.toFixed(3).padStart(6, '0')}`;
+};
+
+type PositionSample = {
+  ms: number;
+  correct: boolean;
+  at: number;
+  fromKeys: string[];
+  toKeys: string[];
+  fromChar: string;
+  toChar: string;
+};
+
+const POSITION_SAMPLE_KEY = "position_transition_samples";
+const POSITION_FAST_THRESHOLD_MS = 900;
+const POSITION_SAMPLE_LIMIT = 200;
+
+const getPositionKeyIdsForChar = (char: string): string[] => {
+  if (!char) return [];
+  const code = char.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return [];
+  const offset = code - 0xac00;
+  const initial = CHOSEONG_LIST[Math.floor(offset / (21 * 28))];
+  const vowel = JUNGSEONG_LIST[Math.floor((offset % (21 * 28)) / 28)];
+  const final = JONGSEONG_LIST[offset % 28];
+
+  const ids = new Set<string>();
+  POSITION_INITIAL_MAP[initial]?.forEach((id) => ids.add(id));
+  POSITION_VOWEL_MAP[vowel]?.forEach((id) => ids.add(id));
+  if (final) POSITION_FINAL_MAP[final]?.forEach((id) => ids.add(id));
+  return [...ids];
+};
+
+const decomposeHangulSyllable = (char: string): { initial: string; vowel: string; final: string } | null => {
+  if (!char) return null;
+  const code = char.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return null;
+  const offset = code - 0xac00;
+  const initial = CHOSEONG_LIST[Math.floor(offset / (21 * 28))];
+  const vowel = JUNGSEONG_LIST[Math.floor((offset % (21 * 28)) / 28)];
+  const final = JONGSEONG_LIST[offset % 28];
+  return { initial, vowel, final };
+};
+
+const getContextTokensForChar = (char: string, baseGroup: PositionRoleGroup): string[] => {
+  const parts = decomposeHangulSyllable(char);
+  if (!parts) return [];
+  const tokens: string[] = [];
+  if (baseGroup !== "initial" && parts.initial) tokens.push(parts.initial);
+  if (baseGroup !== "vowel" && parts.vowel) tokens.push(parts.vowel);
+  if (baseGroup !== "final" && parts.final) tokens.push(parts.final);
+  return tokens;
 };
 
 export default function TypingPractice() {
@@ -37,14 +150,14 @@ export default function TypingPractice() {
     progressCount,
     totalCount,
     mode,
+    positionDifficulty,
     speechRate,
     isSoundEnabled,
     updateInputText,
     updateTypedWord,
     switchMode,
-    changeSpeechRate,
+    setPositionDifficulty,
     toggleSound,
-    removeIncorrectWord,
     isPracticing,
     startPractice,
     stopPractice,
@@ -67,8 +180,12 @@ export default function TypingPractice() {
     setTotalCount,
     resumeSentencePractice,
   } = useTypingStore();
+  const isPositionMode = mode === "position";
+  const isWordLikeMode = mode === "words" || mode === "position";
 
   const [showText, setShowText] = useState(true);
+  const [showPositionKeyboard, setShowPositionKeyboard] = useState(true);
+  const [hoveredPositionKeyId, setHoveredPositionKeyId] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0, elapsedTime: 0 });
   const [allResults, setAllResults] = useState<{ kpm: number, cpm: number, elapsedTime: number, chars: string }[]>([]);
   const sequentialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -117,7 +234,7 @@ export default function TypingPractice() {
   const {
     todayProficiencies, overallProficiencies, recordResult,
     refreshToday, refreshOverall, clearToday, clearOverall, mergeToOverall,
-  } = useWordProficiency();
+  } = useWordProficiency("words");
   const [showProficiencyPanel, setShowProficiencyPanel] = useState(false);
   const [reviewFailedWords, setReviewFailedWords] = useState<{ word: string; typed: string }[]>(() => {
     try {
@@ -128,6 +245,214 @@ export default function TypingPractice() {
   useEffect(() => {
     localStorage.setItem('reviewFailedWords', JSON.stringify(reviewFailedWords));
   }, [reviewFailedWords]);
+
+  const [positionSamples, setPositionSamples] = useState<PositionSample[]>(() => {
+    try {
+      const raw = localStorage.getItem(POSITION_SAMPLE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((s) => ({
+        ms: Number(s?.ms) || 0,
+        correct: !!s?.correct,
+        at: Number(s?.at) || Date.now(),
+        fromKeys: Array.isArray(s?.fromKeys) ? s.fromKeys : [],
+        toKeys: Array.isArray(s?.toKeys) ? s.toKeys : [],
+        fromChar: typeof s?.fromChar === "string" ? s.fromChar : "",
+        toChar: typeof s?.toChar === "string" ? s.toChar : "",
+      }));
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    localStorage.setItem(POSITION_SAMPLE_KEY, JSON.stringify(positionSamples));
+  }, [positionSamples]);
+
+  const positionMetrics = useMemo(() => {
+    const total = positionSamples.length;
+    const correct = positionSamples.filter((s) => s.correct).length;
+    const transitions = positionSamples.filter((s) => s.correct && s.ms > 0);
+    const transitionCount = transitions.length;
+    const avgMs = transitionCount > 0
+      ? Math.round(transitions.reduce((sum, s) => sum + s.ms, 0) / transitionCount)
+      : 0;
+    const fastCount = transitions.filter((s) => s.ms <= POSITION_FAST_THRESHOLD_MS).length;
+    const fastRate = transitionCount > 0 ? Math.round((fastCount / transitionCount) * 100) : 0;
+    const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+    let currentFastStreak = 0;
+    let bestFastStreak = 0;
+    for (const sample of positionSamples) {
+      if (sample.correct && sample.ms > 0 && sample.ms <= POSITION_FAST_THRESHOLD_MS) {
+        currentFastStreak += 1;
+        bestFastStreak = Math.max(bestFastStreak, currentFastStreak);
+      } else {
+        currentFastStreak = 0;
+      }
+    }
+
+    const speedScore = transitionCount === 0
+      ? 0
+      : avgMs <= 400
+        ? 100
+        : avgMs >= 1600
+          ? 0
+          : Math.round((1600 - avgMs) / 12);
+    const agilityScore = Math.max(
+      0,
+      Math.min(100, Math.round(speedScore * 0.5 + fastRate * 0.35 + accuracy * 0.15))
+    );
+    const level = agilityScore >= 85 ? "A" : agilityScore >= 70 ? "B" : agilityScore >= 55 ? "C" : "D";
+
+    const transitionMap = new Map<string, { sumMs: number; count: number; fastCount: number }>();
+    const transitionContextMap = new Map<string, {
+      sumMs: number;
+      count: number;
+      fastCount: number;
+      from: string;
+      to: string;
+      fromRole: PositionKeyRole;
+      toRole: PositionKeyRole;
+      fromGroup: PositionRoleGroup;
+      toGroup: PositionRoleGroup;
+      fromComp: string[];
+      toComp: string[];
+    }>();
+    const fromKeyMap = new Map<string, { sumMs: number; count: number; fastCount: number }>();
+    for (const s of transitions) {
+      const fromKeys = s.fromKeys ?? [];
+      const toKeys = s.toKeys ?? [];
+      if (fromKeys.length === 0 || toKeys.length === 0) continue;
+      for (const fromKey of fromKeys) {
+        for (const toKey of toKeys) {
+          const fromRole = getPositionKeyRole(fromKey);
+          const toRole = getPositionKeyRole(toKey);
+          const fromGroup = getPositionRoleGroup(fromRole);
+          const toGroup = getPositionRoleGroup(toRole);
+          const transitionId = `${fromKey}->${toKey}`;
+          const item = transitionMap.get(transitionId) ?? { sumMs: 0, count: 0, fastCount: 0 };
+          item.sumMs += s.ms;
+          item.count += 1;
+          if (s.ms <= POSITION_FAST_THRESHOLD_MS) item.fastCount += 1;
+          transitionMap.set(transitionId, item);
+
+          const fromComp = getContextTokensForChar(s.fromChar, fromGroup);
+          const toComp = getContextTokensForChar(s.toChar, toGroup);
+          const contextId = `${transitionId}|F:${fromComp.join("+")}|T:${toComp.join("+")}`;
+          const contextItem = transitionContextMap.get(contextId) ?? {
+            sumMs: 0,
+            count: 0,
+            fastCount: 0,
+            from: fromKey,
+            to: toKey,
+            fromRole,
+            toRole,
+            fromGroup,
+            toGroup,
+            fromComp,
+            toComp,
+          };
+          contextItem.sumMs += s.ms;
+          contextItem.count += 1;
+          if (s.ms <= POSITION_FAST_THRESHOLD_MS) contextItem.fastCount += 1;
+          transitionContextMap.set(contextId, contextItem);
+        }
+        const fromItem = fromKeyMap.get(fromKey) ?? { sumMs: 0, count: 0, fastCount: 0 };
+        fromItem.sumMs += s.ms;
+        fromItem.count += 1;
+        if (s.ms <= POSITION_FAST_THRESHOLD_MS) fromItem.fastCount += 1;
+        fromKeyMap.set(fromKey, fromItem);
+      }
+    }
+
+    const perTransition = [...transitionMap.entries()]
+      .map(([id, v]) => {
+        const [from, to] = id.split("->");
+        const fromRole = getPositionKeyRole(from);
+        const toRole = getPositionKeyRole(to);
+        return {
+          id,
+          from,
+          to,
+          fromLabel: POSITION_KEY_LABEL[from] || from,
+          toLabel: POSITION_KEY_LABEL[to] || to,
+          fromRole,
+          toRole,
+          fromGroup: getPositionRoleGroup(fromRole),
+          toGroup: getPositionRoleGroup(toRole),
+          avgMs: Math.round(v.sumMs / v.count),
+          fastRate: Math.round((v.fastCount / v.count) * 100),
+          count: v.count,
+        };
+      })
+      .sort((a, b) => b.avgMs - a.avgMs);
+
+    const perTransitionByContext = [...transitionContextMap.entries()]
+      .map(([id, v]) => ({
+        id,
+        from: v.from,
+        to: v.to,
+        fromLabel: POSITION_KEY_LABEL[v.from] || v.from,
+        toLabel: POSITION_KEY_LABEL[v.to] || v.to,
+        fromRole: v.fromRole,
+        toRole: v.toRole,
+        fromGroup: v.fromGroup,
+        toGroup: v.toGroup,
+        fromComp: v.fromComp,
+        toComp: v.toComp,
+        fromCompLabel: v.fromComp.join("+"),
+        toCompLabel: v.toComp.join("+"),
+        avgMs: Math.round(v.sumMs / v.count),
+        fastRate: Math.round((v.fastCount / v.count) * 100),
+        count: v.count,
+      }))
+      .filter((row) => row.fromGroup === row.toGroup)
+      .sort((a, b) => b.avgMs - a.avgMs);
+
+    const perKey = [...fromKeyMap.entries()]
+      .map(([key, v]) => ({
+        key,
+        label: POSITION_KEY_LABEL[key] || key,
+        role: getPositionKeyRole(key),
+        avgMs: Math.round(v.sumMs / v.count),
+        fastRate: Math.round((v.fastCount / v.count) * 100),
+        count: v.count,
+      }))
+      .sort((a, b) => b.avgMs - a.avgMs);
+
+    return {
+      total,
+      correct,
+      transitionCount,
+      avgMs,
+      fastRate,
+      currentFastStreak,
+      bestFastStreak,
+      agilityScore,
+      level,
+      perTransition,
+      perTransitionByContext,
+      perKey,
+    };
+  }, [positionSamples]);
+  const positionPerKeyMap = useMemo(() => {
+    const m = new Map<string, { avgMs: number; fastRate: number; count: number }>();
+    for (const row of positionMetrics.perKey) {
+      m.set(row.key, { avgMs: row.avgMs, fastRate: row.fastRate, count: row.count });
+    }
+    return m;
+  }, [positionMetrics.perKey]);
+  const hoveredTransitionKeyIds = useMemo(() => {
+    if (!hoveredPositionKeyId) return new Set<string>();
+    const ids = new Set<string>();
+    for (const row of positionMetrics.perTransition) {
+      if (row.from === hoveredPositionKeyId || row.to === hoveredPositionKeyId) {
+        ids.add(row.from);
+        ids.add(row.to);
+      }
+    }
+    return ids;
+  }, [hoveredPositionKeyId, positionMetrics.perTransition]);
 
   const prevReviewActiveRef = useRef(false);
   const prevReviewTypeRef = useRef<string | null>(null);
@@ -227,7 +552,7 @@ export default function TypingPractice() {
     // 복습 중에는 라운드 완료 방지
     if (isReviewActive) return;
     if (
-      (mode === "words" || mode === "sentences") &&
+      ((mode === "words") || mode === "sentences") &&
       isPracticing &&
       totalCount > 0 &&
       progressCount >= totalCount
@@ -426,6 +751,16 @@ export default function TypingPractice() {
     reader.readAsText(file, "UTF-8");
   };
 
+  const recordPositionTransition = (isCorrect: boolean, elapsedMs: number, fromChar: string, toChar: string) => {
+    const safeMs = Number.isFinite(elapsedMs) && elapsedMs > 0 ? Math.round(elapsedMs) : 0;
+    const fromKeys = getPositionKeyIdsForChar(fromChar);
+    const toKeys = getPositionKeyIdsForChar(toChar);
+    setPositionSamples((prev) => {
+      const next = [...prev, { ms: safeMs, correct: isCorrect, at: Date.now(), fromKeys, toKeys, fromChar, toChar }];
+      return next.length > POSITION_SAMPLE_LIMIT ? next.slice(next.length - POSITION_SAMPLE_LIMIT) : next;
+    });
+  };
+
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (isAutoSubmittingRef.current) return; // 자동 제출 직후 IME 잔여 이벤트 무시
     const value = event.target.value;
@@ -438,12 +773,12 @@ export default function TypingPractice() {
         ? currentReviewTarget.trim()
         : mode === "sentences" && isPracticing && sentences[currentSentenceIndex]
           ? sentences[currentSentenceIndex].trim()
-          : mode === "words" && isPracticing && shuffledWords[currentWordIndex]
+          : isWordLikeMode && isPracticing && shuffledWords[currentWordIndex]
             ? shuffledWords[currentWordIndex].trim()
             : null;
 
     const isMatch = autoSubmitTarget && !isAutoSubmittingRef.current && (
-      mode === "words" || isReviewActive
+      isWordLikeMode || isReviewActive
         ? value.replace(/\s+/g, '').endsWith(autoSubmitTarget.replace(/\s+/g, '')) && autoSubmitTarget.replace(/\s+/g, '').length > 0
         : value.trim() === autoSubmitTarget
     );
@@ -474,13 +809,18 @@ export default function TypingPractice() {
         updateTypedWord("");
       } else {
         // 일반 모드: 제출 + 숙련도 기록 + 복습 체크
-        const target = mode === "words" ? shuffledWords[currentWordIndex] : autoSubmitTarget;
+        const target = isWordLikeMode ? shuffledWords[currentWordIndex] : autoSubmitTarget;
         const targetClean = target.replace(/\s+/g, '');
         const inputClean = value.replace(/\s+/g, '');
-        const isCorrect = mode === "words"
+        const isCorrect = isWordLikeMode
           ? inputClean.endsWith(targetClean) && targetClean.length > 0
           : value.trim() === autoSubmitTarget;
         submitAnswer(value);
+        if (isPositionMode) {
+          const fromChar = currentWordIndex > 0 ? shuffledWords[currentWordIndex - 1] : "";
+          const toChar = shuffledWords[currentWordIndex] || "";
+          recordPositionTransition(isCorrect, elapsedMs, fromChar, toChar);
+        }
         if (mode === "words") {
           recordResult(targetClean, isCorrect);
           const nextProgress = progressCount + 1;
@@ -623,8 +963,9 @@ export default function TypingPractice() {
       }
 
       // 기존 모드에서의 엔터 처리
+      let elapsedMs = 0;
       if (currentWordStartTime && currentWordKeystrokes > 0) {
-        const elapsedMs = Date.now() - currentWordStartTime;
+        elapsedMs = Date.now() - currentWordStartTime;
 
         // 0.1초(100ms) 이상 경과하면 계산
         if (elapsedMs >= 100) {
@@ -658,12 +999,19 @@ export default function TypingPractice() {
       }
 
       // 일반 제출
-      if (mode === "words") {
+      if (mode === "words" || isPositionMode) {
         const target = shuffledWords[currentWordIndex];
         const targetClean = target.replace(/\s+/g, '');
         const inputClean = typedWord.replace(/\s+/g, '');
         const isCorrect = inputClean.endsWith(targetClean) && targetClean.length > 0;
-        recordResult(targetClean, isCorrect);
+        if (mode === "words") {
+          recordResult(targetClean, isCorrect);
+        }
+        if (isPositionMode) {
+          const fromChar = currentWordIndex > 0 ? shuffledWords[currentWordIndex - 1] : "";
+          const toChar = shuffledWords[currentWordIndex] || "";
+          recordPositionTransition(isCorrect, elapsedMs, fromChar, toChar);
+        }
       }
       submitAnswer(typedWord);
       if (mode === "words") {
@@ -761,7 +1109,8 @@ export default function TypingPractice() {
       // 타이핑칸에 포커스
       setTimeout(() => typingTextareaRef.current?.focus(), 50);
     } else {
-      const words = inputText.trim().split("/").filter(Boolean);
+      const parsedWords = inputText.trim().split("/").filter(Boolean);
+      const words = isPositionMode ? (parsedWords.length > 0 ? parsedWords : ["자리"]) : parsedWords;
       if (words.length > 0) {
         // 이전 라운드 결과 초기화
         setRoundCompleteResult(null);
@@ -985,7 +1334,7 @@ export default function TypingPractice() {
       };
     } else {
       // 기존 모드: 음성 재생
-      if (mode === "words" && shuffledWords.length > 0) {
+      if (isWordLikeMode && shuffledWords.length > 0) {
         speakText(shuffledWords[currentWordIndex]);
       } else if (mode === "sentences" && sentences.length > 0) {
         speakText(sentences[currentSentenceIndex]);
@@ -1301,6 +1650,18 @@ export default function TypingPractice() {
         <div className="flex gap-2">
           <button
             className={`px-4 py-2 rounded ${
+              mode === "position" ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+            onClick={() => {
+              saveSentenceState();
+              cleanupForModeSwitch();
+              switchMode("position");
+            }}
+          >
+            자리
+          </button>
+          <button
+            className={`px-4 py-2 rounded ${
               mode === "words" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
@@ -1437,7 +1798,7 @@ export default function TypingPractice() {
             )}
 
             {/* 단어/문장 모드: 상세설정 */}
-            {(mode === "words" || mode === "sentences") && (
+            {(isWordLikeMode || mode === "sentences") && (
               <div className="space-y-2 border-t pt-2">
                 <div className="text-sm font-semibold text-gray-600">상세설정</div>
                 <div className="grid grid-cols-2 gap-2">
@@ -1452,7 +1813,7 @@ export default function TypingPractice() {
                       onChange={(e) => {
                         const rate = parseFloat(e.target.value);
                         if (!isNaN(rate) && rate >= 0.1 && rate <= 10) {
-                          changeSpeechRate(rate);
+                          useTypingStore.getState().changeSpeechRate(rate);
                         }
                       }}
                       className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -1460,7 +1821,7 @@ export default function TypingPractice() {
                     <span className="text-xs text-gray-500">배속</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <label className="text-xs whitespace-nowrap">위 글자</label>
+                    <label className="text-xs whitespace-nowrap">글자크기</label>
                     <input
                       type="number"
                       min={12}
@@ -1499,6 +1860,18 @@ export default function TypingPractice() {
                   >
                     소리 {isSoundEnabled ? "ON" : "OFF"}
                   </button>
+                  {isPositionMode && (
+                    <button
+                      className={`px-2 py-1 rounded text-xs font-medium transition ${
+                        showPositionKeyboard
+                          ? "bg-blue-500 text-white hover:bg-blue-600"
+                          : "bg-gray-300 text-gray-700 hover:bg-gray-400"
+                      }`}
+                      onClick={() => setShowPositionKeyboard(!showPositionKeyboard)}
+                    >
+                      키보드 {showPositionKeyboard ? "ON" : "OFF"}
+                    </button>
+                  )}
                 </div>
                 {mode === "sentences" && (
                   <>
@@ -2568,6 +2941,107 @@ export default function TypingPractice() {
 
           {showText && mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <div className="min-h-[200px] p-4 border rounded bg-gray-50">
+              {isPositionMode && (
+                <div className="rounded-2xl border border-amber-300 bg-gradient-to-b from-amber-50 to-amber-100 p-4">
+                  <div className="flex items-center justify-center gap-2 mb-4">
+                    {([
+                      ["beginner", "초급"],
+                      ["intermediate", "중급"],
+                      ["advanced", "고급"],
+                      ["random", "랜덤"],
+                    ] as const).map(([key, label]) => (
+                      <button
+                        key={key}
+                        onClick={() => setPositionDifficulty(key)}
+                        className={`px-3 py-1 rounded border text-xs ${
+                          positionDifficulty === key
+                            ? "bg-emerald-600 text-white border-emerald-700"
+                            : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-10 gap-1.5 max-w-[920px] mx-auto mb-4">
+                    {Array.from({ length: 30 }, (_, offset) => offset).map((offset) => {
+                      const pageStart = Math.floor(currentWordIndex / 30) * 30;
+                      const idx = pageStart + offset;
+                      const char = idx >= 0 && idx < shuffledWords.length ? shuffledWords[idx] : "-";
+                      const isCurrent = idx === currentWordIndex;
+                      return (
+                        <div
+                          key={`position-line-${offset}`}
+                          className={`h-9 rounded-lg border flex items-center justify-center font-semibold ${
+                            isCurrent
+                              ? "bg-rose-100 border-rose-300 text-rose-700"
+                              : "bg-white/80 border-amber-200 text-gray-500"
+                          }`}
+                          style={{ fontSize: `${Math.max(18, Math.round(displayFontSize))}px` }}
+                        >
+                          {char}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {showPositionKeyboard && (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-[700px] mx-auto">
+                        {[POSITION_LEFT_ROWS, POSITION_RIGHT_ROWS].map((rows, sideIdx) => (
+                          <div key={`position-side-${sideIdx}`} className="rounded-2xl bg-white/70 border border-amber-200 p-3">
+                            {rows.map((row, rowIdx) => (
+                              <div key={`position-side-${sideIdx}-row-${rowIdx}`} className="grid grid-cols-5 gap-2 mb-2 last:mb-0">
+                                {row.map((keyDef, colIdx) => (
+                                  <div
+                                    key={`position-key-${sideIdx}-${rowIdx}-${colIdx}`}
+                                    className={`h-14 rounded-xl border flex flex-col items-center justify-center bg-white border-gray-300 text-gray-800 cursor-pointer transition-all duration-150 ${
+                                      hoveredPositionKeyId === keyDef.id
+                                        ? "bg-rose-500 text-white border-rose-700 ring-4 ring-rose-200 shadow-lg scale-105"
+                                        : hoveredTransitionKeyIds.has(keyDef.id)
+                                          ? "bg-amber-300 text-gray-900 border-amber-500 ring-2 ring-amber-100 shadow"
+                                          : ""
+                                    }`}
+                                    onMouseEnter={() => setHoveredPositionKeyId(keyDef.id)}
+                                    onMouseLeave={() => setHoveredPositionKeyId(null)}
+                                  >
+                                    <div className="text-lg font-semibold leading-none">{keyDef.label}</div>
+                                    <div className="text-[10px] leading-tight text-gray-500 mt-1">
+                                      {positionPerKeyMap.get(keyDef.id)?.avgMs ? `${positionPerKeyMap.get(keyDef.id)!.avgMs}ms` : "-"}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="max-w-[360px] mx-auto mt-4 rounded-2xl bg-white/70 border border-amber-200 p-3">
+                        <div className="grid grid-cols-6 gap-2">
+                          {POSITION_THUMB_ROW.map((keyDef, idx) => (
+                            <div
+                              key={`position-thumb-${idx}`}
+                              className={`h-14 rounded-xl border flex flex-col items-center justify-center bg-white border-gray-300 text-gray-800 cursor-pointer transition-all duration-150 ${
+                                hoveredPositionKeyId === keyDef.id
+                                  ? "bg-rose-500 text-white border-rose-700 ring-4 ring-rose-200 shadow-lg scale-105"
+                                  : hoveredTransitionKeyIds.has(keyDef.id)
+                                    ? "bg-amber-300 text-gray-900 border-amber-500 ring-2 ring-amber-100 shadow"
+                                    : ""
+                              }`}
+                              onMouseEnter={() => setHoveredPositionKeyId(keyDef.id)}
+                              onMouseLeave={() => setHoveredPositionKeyId(null)}
+                            >
+                              <div className="text-lg font-semibold leading-none">{keyDef.label}</div>
+                              <div className="text-[10px] leading-tight text-gray-500 mt-1">
+                                {positionPerKeyMap.get(keyDef.id)?.avgMs ? `${positionPerKeyMap.get(keyDef.id)!.avgMs}ms` : "-"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               {mode === "words" && !isReviewActive && (
                 <div className="flex flex-col items-start gap-1 mb-2">
                   {[-2, -1].map(offset => {
@@ -2642,19 +3116,26 @@ export default function TypingPractice() {
               <p className="text-sm font-medium">
                 <span className="text-blue-600">정답: {correctCount}</span> |{" "}
                 <span className="text-rose-600">오답: {incorrectCount}</span> |
-                진행: {progressCount} / {mode === "sentences" && generatedCount > 0 ? generatedCount : totalCount}
+                진행: {mode === "position" ? progressCount : `${progressCount} / ${mode === "sentences" && generatedCount > 0 ? generatedCount : totalCount}`}
                 {isReviewActive && mode === "words" && (
                   <> | <span className={`font-bold ${reviewType === "failed" ? "text-amber-700" : "text-orange-600"}`}>{reviewType === "failed" ? "2차복습" : "1차복습"}: {currentReviewIndex + 1}/{reviewWords.length}</span></>
                 )}
               </p>
 
-              {mode === "words" && (
+              {isWordLikeMode && (
                 <div className="flex gap-2 mt-1">
                   <button
-                    onClick={() => { const next = !showProficiencyPanel; setShowProficiencyPanel(next); if (next) { refreshToday(); refreshOverall(); } }}
+                    onClick={() => {
+                      const next = !showProficiencyPanel;
+                      setShowProficiencyPanel(next);
+                      if (next && mode === "words") {
+                        refreshToday();
+                        refreshOverall();
+                      }
+                    }}
                     className={`text-xs px-3 py-1 rounded border ${showProficiencyPanel ? 'bg-blue-500 text-white border-blue-500' : 'bg-white border-gray-300 hover:bg-gray-100'}`}
                   >
-                    숙련도
+                    {isPositionMode ? "자리 숙련도" : "숙련도"}
                   </button>
                 </div>
               )}
@@ -2671,53 +3152,97 @@ export default function TypingPractice() {
                   onClose={() => setShowProficiencyPanel(false)}
                 />
               )}
-
-              <div className={`grid gap-4 ${mode === "words" ? "grid-cols-2" : "grid-cols-1"}`}>
-                <div>
-                  <h2 className="text-xl font-semibold mb-2">{mode === "words" ? "복습단어 (1차복습)" : "오답 노트"}</h2>
-                  <div className="h-[500px] overflow-y-scroll border rounded p-2">
-                    <ul className="space-y-1 text-sm">
-                      {incorrectWords.map((item) => (
-                        <li
-                          key={`${item.word}-${item.typed}`}
-                          className="text-rose-600 flex items-center gap-2"
-                        >
-                          <button
-                            className="bg-stone-500 text-white rounded px-2 py-0.5 text-sm"
-                            onClick={() => removeIncorrectWord(item.word, item.typed)}
-                          >
-                            &times;
-                          </button>
-                          {item.word} → {item.typed}
-                        </li>
-                      ))}
-                    </ul>
+              {showProficiencyPanel && isPositionMode && (
+                <div className="border rounded p-4 bg-white space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold">자리 전환 숙련도</h3>
+                    <button onClick={() => setShowProficiencyPanel(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
                   </div>
-                </div>
-                {mode === "words" && (
-                  <div>
-                    <h2 className="text-xl font-semibold mb-2 text-amber-700">오답노트 (2차복습)</h2>
-                    <div className="h-[500px] overflow-y-scroll border border-amber-300 rounded p-2 bg-amber-50">
-                      <ul className="space-y-1 text-sm">
-                        {reviewFailedWords.map((item, i) => (
-                          <li
-                            key={`${item.word}-${item.typed}-${i}`}
-                            className="text-amber-700 flex items-center gap-2"
-                          >
-                            <button
-                              className="bg-amber-500 text-white rounded px-2 py-0.5 text-sm"
-                              onClick={() => setReviewFailedWords(prev => prev.filter((_, idx) => idx !== i))}
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("initial")}`}>초성 (왼손)</span>
+                    <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("vowel_left_thumb")}`}>중성 (양엄지)</span>
+                    <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("final")}`}>종성 (오른손)</span>
+                  </div>
+                  {hoveredPositionKeyId && (
+                    <div className="text-xs text-amber-700">
+                      선택 키: <span className="font-semibold">{POSITION_KEY_LABEL[hoveredPositionKeyId] || hoveredPositionKeyId}</span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-sm font-semibold mb-1">키 전환 구간 약점</div>
+                      <div className="max-h-80 overflow-y-auto border rounded">
+                        {positionMetrics.perTransition.length === 0 ? (
+                          <div className="p-2 text-xs text-gray-400">데이터 없음</div>
+                        ) : (
+                          positionMetrics.perTransition.slice(0, 80).map((row) => (
+                            <div
+                              key={row.id}
+                              className={`px-2 py-1 text-xs border-b last:border-b-0 transition ${
+                                !hoveredPositionKeyId
+                                  ? ""
+                                  : (row.from === hoveredPositionKeyId || row.to === hoveredPositionKeyId)
+                                    ? "bg-amber-100"
+                                    : "opacity-40"
+                              }`}
                             >
-                              &times;
-                            </button>
-                            {item.word} → {item.typed}
-                          </li>
-                        ))}
-                      </ul>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium flex items-center gap-1">
+                                  <span className={`px-1.5 py-0.5 rounded border ${getPositionRoleColorClass(row.fromRole)}`}>{row.fromLabel}</span>
+                                  <span className="text-gray-400">→</span>
+                                  <span className={`px-1.5 py-0.5 rounded border ${getPositionRoleColorClass(row.toRole)}`}>{row.toLabel}</span>
+                                </span>
+                                <span className="text-gray-600">평균 {row.avgMs}ms | 빠른 {row.fastRate}% | {row.count}회</span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold mb-1">동시 조합별 약점</div>
+                      <div className="max-h-80 overflow-y-auto border rounded">
+                        {positionMetrics.perTransitionByContext.length === 0 ? (
+                          <div className="p-2 text-xs text-gray-400">데이터 없음</div>
+                        ) : (
+                          positionMetrics.perTransitionByContext.slice(0, 80).map((row) => (
+                            <div
+                              key={row.id}
+                              className={`px-2 py-1 text-xs border-b last:border-b-0 transition ${
+                                !hoveredPositionKeyId
+                                  ? ""
+                                  : (row.from === hoveredPositionKeyId || row.to === hoveredPositionKeyId)
+                                    ? "bg-amber-100"
+                                    : "opacity-40"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium flex items-center gap-1">
+                                  <span className={`px-1.5 py-0.5 rounded border ${getPositionRoleColorClass(row.fromRole)}`}>{row.fromLabel}</span>
+                                  <span className="text-gray-400">→</span>
+                                  <span className={`px-1.5 py-0.5 rounded border ${getPositionRoleColorClass(row.toRole)}`}>{row.toLabel}</span>
+                                </span>
+                                <span className="text-gray-600">평균 {row.avgMs}ms | 빠른 {row.fastRate}% | {row.count}회</span>
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-gray-500">
+                                동시키: ({row.fromCompLabel || "-"}) → ({row.toCompLabel || "-"})
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
-                )}
-              </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setPositionSamples([])}
+                      className="text-xs px-3 py-1.5 rounded border text-red-600 border-red-300 hover:bg-red-50"
+                    >
+                      자리숙련도 초기화
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -2725,3 +3250,4 @@ export default function TypingPractice() {
     </div>
   );
 }
+

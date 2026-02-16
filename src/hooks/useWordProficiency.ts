@@ -9,51 +9,51 @@ import {
   type WordProficiency,
 } from "../utils/indexedDB";
 
-export function useWordProficiency() {
+export function useWordProficiency(scope: "words" | "position" = "words") {
   const [todayProficiencies, setTodayProficiencies] = useState<WordProficiency[]>([]);
   const [overallProficiencies, setOverallProficiencies] = useState<WordProficiency[]>([]);
 
   const recordResult = useCallback((word: string, isCorrect: boolean) => {
-    updateTodayProficiency(word, isCorrect).catch(() => {});
-  }, []);
+    updateTodayProficiency(word, isCorrect, scope).catch(() => {});
+  }, [scope]);
 
   const refreshToday = useCallback(async () => {
     try {
-      const data = await getAllTodayProficiencies();
+      const data = await getAllTodayProficiencies(scope);
       setTodayProficiencies(data);
     } catch { /* ignore */ }
-  }, []);
+  }, [scope]);
 
   const refreshOverall = useCallback(async () => {
     try {
-      const data = await getAllWordProficiencies();
+      const data = await getAllWordProficiencies(scope);
       setOverallProficiencies(data);
     } catch { /* ignore */ }
-  }, []);
+  }, [scope]);
 
   const clearToday = useCallback(async () => {
     try {
-      await clearTodayProficiencies();
+      await clearTodayProficiencies(scope);
       setTodayProficiencies([]);
     } catch { /* ignore */ }
-  }, []);
+  }, [scope]);
 
   const clearOverall = useCallback(async () => {
     try {
-      await clearWordProficiencies();
+      await clearWordProficiencies(scope);
       setOverallProficiencies([]);
     } catch { /* ignore */ }
-  }, []);
+  }, [scope]);
 
   const mergeToOverall = useCallback(async () => {
     try {
-      await mergeTodayToOverall();
-      await clearTodayProficiencies();
+      await mergeTodayToOverall(scope);
+      await clearTodayProficiencies(scope);
       setTodayProficiencies([]);
-      const data = await getAllWordProficiencies();
+      const data = await getAllWordProficiencies(scope);
       setOverallProficiencies(data);
     } catch { /* ignore */ }
-  }, []);
+  }, [scope]);
 
   return {
     todayProficiencies,
