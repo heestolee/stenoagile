@@ -3,7 +3,8 @@ import { persist } from "zustand/middleware";
 import { STORAGE_KEY } from "../constants";
 import { cpsToRate } from "../utils/speechUtils";
 
-export type Mode = "words" | "sentences" | "longtext" | "random" | "sequential";
+export type Mode = "words" | "position" | "sentences" | "longtext" | "random" | "sequential";
+export type PositionDifficulty = "beginner" | "intermediate" | "advanced" | "random";
 
 export interface IncorrectEntry {
   word: string;
@@ -25,6 +26,7 @@ interface TypingState {
   totalCount: number;
   progressCount: number;
   mode: Mode;
+  positionDifficulty: PositionDifficulty;
   speechRate: number;
   isSoundEnabled: boolean;
   isPracticing: boolean;
@@ -43,6 +45,7 @@ interface TypingState {
   updateInputText: (text: string) => void;
   updateTypedWord: (text: string) => void;
   switchMode: (mode: Mode) => void;
+  setPositionDifficulty: (difficulty: PositionDifficulty) => void;
   changeSpeechRate: (rate: number) => void;
   toggleSound: () => void;
   removeIncorrectWord: (word: string, typed: string) => void;
@@ -76,6 +79,44 @@ interface TypingState {
 
 const removeWhitespace = (text: string): string => text.replace(/\s+/g, "");
 
+const randomInt = (max: number): number => Math.floor(Math.random() * max);
+const pick = <T>(arr: readonly T[]): T => arr[randomInt(arr.length)];
+
+const BEGINNER_SYLLABLES = [
+  "가", "나", "다", "라", "마", "바", "사", "아", "자", "차", "카", "타", "파", "하",
+  "거", "너", "더", "러", "머", "버", "서", "어", "저", "처", "커", "터", "퍼", "허",
+  "고", "노", "도", "로", "모", "보", "소", "오", "조", "초", "코", "토", "포", "호",
+  "구", "누", "두", "루", "무", "부", "수", "우", "주", "추", "쿠", "투", "푸", "후",
+] as const;
+
+const INTERMEDIATE_SYLLABLES = [
+  "개", "내", "대", "래", "매", "배", "새", "애", "재", "채", "태", "패", "해",
+  "게", "네", "데", "레", "메", "베", "세", "에", "제", "체", "테", "페", "헤",
+  "기", "니", "디", "리", "미", "비", "시", "이", "지", "치", "키", "티", "피", "히",
+  "관", "전", "문", "학", "국", "민", "정", "보", "기", "술", "경", "제", "사", "회",
+] as const;
+
+const ADVANCED_SYLLABLES = [
+  "읽", "넓", "삶", "앉", "않", "값", "몫", "젊", "짊", "싫",
+  "권", "혁", "률", "념", "량", "형", "확", "획", "결", "렬",
+  "왕", "왜", "외", "워", "웨", "위", "의", "얘", "예", "얽",
+  "락", "력", "령", "룡", "률", "융", "괄", "괜", "괌", "괏",
+] as const;
+
+const createPositionSyllable = (difficulty: PositionDifficulty): string => {
+  if (difficulty === "random") {
+    const mixed = pick<Exclude<PositionDifficulty, "random">>(["beginner", "intermediate", "advanced"]);
+    return createPositionSyllable(mixed);
+  }
+  if (difficulty === "beginner") {
+    return pick(BEGINNER_SYLLABLES);
+  }
+  if (difficulty === "intermediate") {
+    return pick(INTERMEDIATE_SYLLABLES);
+  }
+  return pick(ADVANCED_SYLLABLES);
+};
+
 
 export const useTypingStore = create<TypingState>()(
   persist(
@@ -94,6 +135,7 @@ export const useTypingStore = create<TypingState>()(
       totalCount: 0,
       progressCount: 0,
       mode: "words",
+      positionDifficulty: "random",
       speechRate: cpsToRate(3),
       isSoundEnabled: true,
       isPracticing: false,
@@ -112,6 +154,7 @@ export const useTypingStore = create<TypingState>()(
       updateInputText: (text) => set({ inputText: text }),
       updateTypedWord: (text) => set({ typedWord: text }),
       switchMode: (mode) => set({ mode }),
+      setPositionDifficulty: (positionDifficulty) => set({ positionDifficulty }),
       changeSpeechRate: (rate) => set({ speechRate: rate }),
       toggleSound: () => set((state) => ({ isSoundEnabled: !state.isSoundEnabled })),
       startCurrentWordTracking: () => set({
@@ -219,9 +262,16 @@ export const useTypingStore = create<TypingState>()(
           const shuffledLetters = [...uniqueLetters].sort(
             () => Math.random() - 0.5
           );
+          const generatedPositionChars = Array.from(
+            { length: Math.max(words.length, 60) },
+            () => createPositionSyllable(state.positionDifficulty)
+          );
+          const practiceWords = state.mode === "position"
+            ? generatedPositionChars
+            : [...words].sort(() => Math.random() - 0.5);
 
           set({
-            shuffledWords: [...words].sort(() => Math.random() - 0.5),
+            shuffledWords: practiceWords,
             sentences: state.sentences,
             randomLetters: shuffledLetters,
             currentWordIndex: 0,
@@ -232,9 +282,11 @@ export const useTypingStore = create<TypingState>()(
             incorrectCount: 0,
             incorrectWords: [],
             totalCount:
-              state.mode === "random"
+              state.mode === "position"
+                ? 0
+                : state.mode === "random"
                 ? shuffledLetters.length
-                : words.length,
+                : practiceWords.length,
             progressCount: 0,
             isPracticing: true,
             currentWordStartTime: null,
@@ -287,46 +339,64 @@ export const useTypingStore = create<TypingState>()(
           currentWordIndex,
           currentSentenceIndex,
           currentLetterIndex,
-          progressCount: currentProgress,
-          totalCount: currentTotal,
+          positionDifficulty,
         } = get();
 
         const trimmedInput = mode === "sentences"
           ? input.trim()
           : removeWhitespace(input);
         const target =
-          mode === "words"
-            ? removeWhitespace(shuffledWords[currentWordIndex])
+          (mode === "words" || mode === "position")
+            ? removeWhitespace(shuffledWords[currentWordIndex] ?? "")
             : mode === "sentences"
             ? sentences[currentSentenceIndex].trim()
             : randomLetters[currentLetterIndex];
 
         const isCorrect = trimmedInput === target;
-        const isLastItem = currentProgress + 1 >= currentTotal && currentTotal > 0;
 
-        set((state) => ({
-          correctCount: isCorrect ? state.correctCount + 1 : state.correctCount,
-          incorrectCount: !isCorrect
-            ? state.incorrectCount + 1
-            : state.incorrectCount,
-          incorrectWords: !isCorrect
-            ? [...state.incorrectWords, { word: target, typed: input.trim() }]
-            : state.incorrectWords,
-          currentWordIndex:
-            mode === "words"
-              ? isLastItem ? currentWordIndex : (currentWordIndex + 1) % shuffledWords.length
-              : currentWordIndex,
-          currentSentenceIndex:
-            mode === "sentences"
-              ? isLastItem ? currentSentenceIndex : (currentSentenceIndex + 1) % sentences.length
-              : currentSentenceIndex,
-          currentLetterIndex:
-            mode === "random"
-              ? (currentLetterIndex + 1) % randomLetters.length
-              : currentLetterIndex,
-          typedWord: "",
-          progressCount: state.progressCount + 1,
-        }));
+        set((state) => {
+          const isLastItem = state.progressCount + 1 >= state.totalCount && state.totalCount > 0;
+          let nextShuffledWords = state.shuffledWords;
+          let nextWordIndex = state.currentWordIndex;
+
+          if (mode === "position") {
+            nextWordIndex = state.currentWordIndex + 1;
+            if (nextWordIndex + 30 >= nextShuffledWords.length) {
+              const appendCount = 60;
+              const extra = Array.from(
+                { length: appendCount },
+                () => createPositionSyllable(positionDifficulty)
+              );
+              nextShuffledWords = [...nextShuffledWords, ...extra];
+            }
+          } else if (mode === "words") {
+            nextWordIndex = isLastItem
+              ? state.currentWordIndex
+              : (state.currentWordIndex + 1) % Math.max(state.shuffledWords.length, 1);
+          }
+
+          return {
+            correctCount: isCorrect ? state.correctCount + 1 : state.correctCount,
+            incorrectCount: !isCorrect
+              ? state.incorrectCount + 1
+              : state.incorrectCount,
+            incorrectWords: !isCorrect
+              ? [...state.incorrectWords, { word: target, typed: input.trim() }]
+              : state.incorrectWords,
+            shuffledWords: nextShuffledWords,
+            currentWordIndex: mode === "words" || mode === "position" ? nextWordIndex : state.currentWordIndex,
+            currentSentenceIndex:
+              mode === "sentences"
+                ? isLastItem ? state.currentSentenceIndex : (state.currentSentenceIndex + 1) % Math.max(state.sentences.length, 1)
+                : state.currentSentenceIndex,
+            currentLetterIndex:
+              mode === "random"
+                ? (state.currentLetterIndex + 1) % Math.max(state.randomLetters.length, 1)
+                : state.currentLetterIndex,
+            typedWord: "",
+            progressCount: state.progressCount + 1,
+          };
+        });
       },
     }),
     {
@@ -334,6 +404,7 @@ export const useTypingStore = create<TypingState>()(
       partialize: (state) => ({
         inputText: state.inputText,
         mode: state.mode,
+        positionDifficulty: state.positionDifficulty,
         speechRate: state.speechRate,
         isSoundEnabled: state.isSoundEnabled,
         sequentialSpeed: state.sequentialSpeed,
