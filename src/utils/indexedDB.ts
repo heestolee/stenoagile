@@ -10,6 +10,20 @@ export interface WordProficiency {
   lastPracticed: number;
 }
 
+const scopedWordKey = (word: string, scope?: string): string =>
+  scope ? `${scope}::${word}` : word;
+
+const stripScopeFromWordKey = (wordKey: string, scope?: string): string => {
+  if (!scope) return wordKey;
+  const prefix = `${scope}::`;
+  return wordKey.startsWith(prefix) ? wordKey.slice(prefix.length) : wordKey;
+};
+
+const isScopedWordKey = (wordKey: string, scope?: string): boolean => {
+  if (!scope) return true;
+  return wordKey.startsWith(`${scope}::`);
+};
+
 export const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 3);
@@ -69,24 +83,25 @@ export const clearVideosDB = async () => {
 
 // --- 오늘의 숙련도 ---
 
-export const updateTodayProficiency = async (word: string, isCorrect: boolean): Promise<void> => {
+export const updateTodayProficiency = async (word: string, isCorrect: boolean, scope?: string): Promise<void> => {
   const db = await openDB();
   const tx = db.transaction(TODAY_PROFICIENCY_STORE, 'readwrite');
   const store = tx.objectStore(TODAY_PROFICIENCY_STORE);
+  const key = scopedWordKey(word, scope);
 
   return new Promise((resolve, reject) => {
-    const getReq = store.get(word);
+    const getReq = store.get(key);
     getReq.onsuccess = () => {
       const existing: WordProficiency | undefined = getReq.result;
       const updated: WordProficiency = existing
         ? {
-            word,
+            word: key,
             correctCount: existing.correctCount + (isCorrect ? 1 : 0),
             incorrectCount: existing.incorrectCount + (isCorrect ? 0 : 1),
             lastPracticed: Date.now(),
           }
         : {
-            word,
+            word: key,
             correctCount: isCorrect ? 1 : 0,
             incorrectCount: isCorrect ? 0 : 1,
             lastPracticed: Date.now(),
@@ -98,22 +113,41 @@ export const updateTodayProficiency = async (word: string, isCorrect: boolean): 
   });
 };
 
-export const getAllTodayProficiencies = async (): Promise<WordProficiency[]> => {
+export const getAllTodayProficiencies = async (scope?: string): Promise<WordProficiency[]> => {
   const db = await openDB();
   const tx = db.transaction(TODAY_PROFICIENCY_STORE, 'readonly');
   const store = tx.objectStore(TODAY_PROFICIENCY_STORE);
   const request = store.getAll();
 
   return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const filtered = (request.result as WordProficiency[])
+        .filter((item) => isScopedWordKey(item.word, scope))
+        .map((item) => ({ ...item, word: stripScopeFromWordKey(item.word, scope) }));
+      resolve(filtered);
+    };
     request.onerror = () => reject(request.error);
   });
 };
 
-export const clearTodayProficiencies = async (): Promise<void> => {
+export const clearTodayProficiencies = async (scope?: string): Promise<void> => {
   const db = await openDB();
   const tx = db.transaction(TODAY_PROFICIENCY_STORE, 'readwrite');
-  tx.objectStore(TODAY_PROFICIENCY_STORE).clear();
+  const store = tx.objectStore(TODAY_PROFICIENCY_STORE);
+  if (!scope) {
+    store.clear();
+  } else {
+    const req = store.openCursor();
+    req.onsuccess = (event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+      if (!cursor) return;
+      const value = cursor.value as WordProficiency;
+      if (isScopedWordKey(value.word, scope)) {
+        cursor.delete();
+      }
+      cursor.continue();
+    };
+  }
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
@@ -123,22 +157,41 @@ export const clearTodayProficiencies = async (): Promise<void> => {
 
 // --- 전체 숙련도 ---
 
-export const getAllWordProficiencies = async (): Promise<WordProficiency[]> => {
+export const getAllWordProficiencies = async (scope?: string): Promise<WordProficiency[]> => {
   const db = await openDB();
   const tx = db.transaction(PROFICIENCY_STORE, 'readonly');
   const store = tx.objectStore(PROFICIENCY_STORE);
   const request = store.getAll();
 
   return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const filtered = (request.result as WordProficiency[])
+        .filter((item) => isScopedWordKey(item.word, scope))
+        .map((item) => ({ ...item, word: stripScopeFromWordKey(item.word, scope) }));
+      resolve(filtered);
+    };
     request.onerror = () => reject(request.error);
   });
 };
 
-export const clearWordProficiencies = async (): Promise<void> => {
+export const clearWordProficiencies = async (scope?: string): Promise<void> => {
   const db = await openDB();
   const tx = db.transaction(PROFICIENCY_STORE, 'readwrite');
-  tx.objectStore(PROFICIENCY_STORE).clear();
+  const store = tx.objectStore(PROFICIENCY_STORE);
+  if (!scope) {
+    store.clear();
+  } else {
+    const req = store.openCursor();
+    req.onsuccess = (event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+      if (!cursor) return;
+      const value = cursor.value as WordProficiency;
+      if (isScopedWordKey(value.word, scope)) {
+        cursor.delete();
+      }
+      cursor.continue();
+    };
+  }
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
@@ -148,16 +201,17 @@ export const clearWordProficiencies = async (): Promise<void> => {
 
 // --- 오늘 → 전체 병합 ---
 
-export const mergeTodayToOverall = async (): Promise<void> => {
+export const mergeTodayToOverall = async (scope?: string): Promise<void> => {
   const db = await openDB();
 
   // 오늘 데이터 읽기
-  const todayData: WordProficiency[] = await new Promise((resolve, reject) => {
+  const rawTodayData: WordProficiency[] = await new Promise((resolve, reject) => {
     const tx = db.transaction(TODAY_PROFICIENCY_STORE, 'readonly');
     const req = tx.objectStore(TODAY_PROFICIENCY_STORE).getAll();
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+  const todayData = rawTodayData.filter((item) => isScopedWordKey(item.word, scope));
 
   if (todayData.length === 0) return;
 
