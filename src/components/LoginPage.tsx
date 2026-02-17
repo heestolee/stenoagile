@@ -3,7 +3,7 @@ import { useAuth } from "../hooks/useAuth";
 
 type Mode = "login" | "signup";
 
-export default function LoginPage() {
+export default function LoginPage({ onClose }: { onClose: () => void }) {
   const { signIn, signUp, signInWithGoogle } = useAuth();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -20,7 +20,11 @@ export default function LoginPage() {
 
     if (mode === "login") {
       const { error } = await signIn(email, password);
-      if (error) setError(error.message);
+      if (error) {
+        setError(error.message);
+      } else {
+        onClose();
+      }
     } else {
       const { error } = await signUp(email, password);
       if (error) {
@@ -39,9 +43,15 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-center mb-6">Stenosaurus</h1>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white p-8 rounded-lg shadow-md w-full max-w-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h1 className="text-2xl font-bold text-center mb-6">로그인</h1>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

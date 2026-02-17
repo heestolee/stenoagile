@@ -13,6 +13,7 @@ import { useSlotManager } from "../hooks/useSlotManager";
 import { useWordReview } from "../hooks/useWordReview";
 import { useWordProficiency } from "../hooks/useWordProficiency";
 import { useAuth } from "../hooks/useAuth";
+import LoginPage from "./LoginPage";
 import WordProficiencyPanel from "./WordProficiencyPanel";
 
 type PositionKeyDef = { id: string; label: string };
@@ -195,7 +196,8 @@ export default function TypingPractice() {
     setTotalCount,
     resumeSentencePractice,
   } = useTypingStore();
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const isPositionMode = mode === "position";
   const isWordLikeMode = mode === "words" || mode === "position";
 
@@ -1762,12 +1764,6 @@ export default function TypingPractice() {
     <div className="p-4 w-full">
       <div className="flex items-center gap-4 mb-4">
         <h1 className="text-2xl font-bold">Stenosaurus</h1>
-        <button
-          onClick={signOut}
-          className="ml-auto px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
-        >
-          로그아웃
-        </button>
         <div className="flex gap-2">
           <button
             className={`px-4 py-2 rounded ${
@@ -1866,6 +1862,21 @@ export default function TypingPractice() {
             듣고 치라
           </button>
         </div>
+        {user ? (
+          <button
+            onClick={signOut}
+            className="ml-auto px-4 py-2 rounded bg-gray-300 hover:bg-gray-400"
+          >
+            로그아웃
+          </button>
+        ) : (
+          <button
+            onClick={() => setShowLoginModal(true)}
+            className="ml-auto px-4 py-2 rounded bg-blue-500 text-white hover:bg-blue-600"
+          >
+            로그인
+          </button>
+        )}
       </div>
 
       <div className="flex flex-row gap-0">
@@ -3422,6 +3433,9 @@ export default function TypingPractice() {
           )}
         </div>
       </div>
+      {showLoginModal && (
+        <LoginPage onClose={() => setShowLoginModal(false)} />
+      )}
     </div>
   );
 }
