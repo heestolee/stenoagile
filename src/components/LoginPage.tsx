@@ -8,6 +8,7 @@ export default function LoginPage({ onClose }: { onClose: () => void }) {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -26,6 +27,11 @@ export default function LoginPage({ onClose }: { onClose: () => void }) {
         onClose();
       }
     } else {
+      if (password !== confirmPassword) {
+        setError("비밀번호가 일치하지 않습니다.");
+        setSubmitting(false);
+        return;
+      }
       const { error } = await signUp(email, password);
       if (error) {
         setError(error.message);
@@ -80,6 +86,22 @@ export default function LoginPage({ onClose }: { onClose: () => void }) {
               required
             />
           </div>
+
+          {mode === "signup" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                비밀번호 확인
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                minLength={6}
+                required
+              />
+            </div>
+          )}
 
           {error && (
             <p className="text-red-500 text-sm">{error}</p>
@@ -138,7 +160,7 @@ export default function LoginPage({ onClose }: { onClose: () => void }) {
             <>
               계정이 없으신가요?{" "}
               <button
-                onClick={() => { setMode("signup"); setError(""); setMessage(""); }}
+                onClick={() => { setMode("signup"); setError(""); setMessage(""); setConfirmPassword(""); }}
                 className="text-blue-500 hover:underline"
               >
                 회원가입
@@ -148,7 +170,7 @@ export default function LoginPage({ onClose }: { onClose: () => void }) {
             <>
               이미 계정이 있으신가요?{" "}
               <button
-                onClick={() => { setMode("login"); setError(""); setMessage(""); }}
+                onClick={() => { setMode("login"); setError(""); setMessage(""); setConfirmPassword(""); }}
                 className="text-blue-500 hover:underline"
               >
                 로그인
