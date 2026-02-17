@@ -1,6 +1,6 @@
 ﻿//테스트용 주석 추가
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useMemo } from "react";
-import { useTypingStore } from "../store/useTypingStore";
+import { useTypingStore, type PositionStage, POSITION_BASE_QUESTION_COUNT, POSITION_RECOMMENDED_MAX_COUNT } from "../store/useTypingStore";
 import { savedText1, savedText2, savedText5 } from "../constants";
 import { GEMINI_MODEL_NAMES, SENTENCE_STYLES } from "../constants/uiConstants";
 import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../utils/scoringAnalysis";
@@ -95,6 +95,7 @@ type PositionSample = {
   ms: number;
   correct: boolean;
   at: number;
+  stage: PositionStage | "mixed";
   fromKeys: string[];
   toKeys: string[];
   fromChar: string;
@@ -102,9 +103,24 @@ type PositionSample = {
 };
 
 const POSITION_SAMPLE_KEY = "position_transition_samples";
-const POSITION_WORD_BLACKLIST_KEY = "position_word_blacklist";
 const POSITION_FAST_THRESHOLD_MS = 900;
 const POSITION_SAMPLE_LIMIT = 200;
+const HANGUL_CHAR = /^[가-힣]$/;
+const HANGUL_WORD_2_3 = /^[가-힣]{2,3}$/;
+const POSITION_RECOMMENDED_SOURCE_WORD_COUNT = 10;
+const POSITION_WEAK_LINK_HIGHLIGHT_LIMIT = 6;
+const POSITION_STAGE_OPTIONS: Array<{ key: PositionStage; label: string; numLabel: string; btnLabel: string }> = [
+  { key: "initial_mid", label: "1단계 초성 중간자리", numLabel: "1", btnLabel: "초성중간" },
+  { key: "final_mid", label: "2단계 종성 중간자리", numLabel: "2", btnLabel: "종성중간" },
+  { key: "initial_bottom", label: "3단계 초성 아랫자리", numLabel: "3", btnLabel: "초성아래" },
+  { key: "final_bottom", label: "4단계 종성 아랫자리", numLabel: "4", btnLabel: "종성아래" },
+  { key: "initial_top", label: "5단계 초성 윗자리", numLabel: "5", btnLabel: "초성위" },
+  { key: "final_top", label: "6단계 종성 윗자리", numLabel: "6", btnLabel: "종성위" },
+  { key: "double_consonant", label: "7단계 쌍자음", numLabel: "7", btnLabel: "쌍자음" },
+  { key: "compound_vowel_1", label: "8단계 겹모음 1", numLabel: "8", btnLabel: "겹모음1" },
+  { key: "compound_vowel_2", label: "9단계 겹모음 2", numLabel: "9", btnLabel: "겹모음2" },
+  { key: "complex_final", label: "10단계 겹받침", numLabel: "10", btnLabel: "겹받침" },
+];
 
 const getPositionKeyIdsForChar = (char: string): string[] => {
   if (!char) return [];
@@ -142,15 +158,6 @@ const getContextTokensForChar = (char: string, baseGroup: PositionRoleGroup): st
   if (baseGroup !== "final" && parts.final) tokens.push(parts.final);
   return tokens;
 };
-const getGroupUnitForChar = (char: string, group: PositionRoleGroup): string => {
-  const parts = decomposeHangulSyllable(char);
-  if (!parts) return "";
-  if (group === "initial") return parts.initial;
-  if (group === "vowel") return parts.vowel;
-  return parts.final;
-};
-const HANGUL_WORD_ONLY = /^[가-힣]{2,8}$/;
-
 export default function TypingPractice() {
   const {
     inputText,
@@ -166,13 +173,19 @@ export default function TypingPractice() {
     progressCount,
     totalCount,
     mode,
-    positionDifficulty,
+    positionEnabledStages,
+    positionStageExcludedChars,
     speechRate,
     isSoundEnabled,
     updateInputText,
     updateTypedWord,
     switchMode,
-    setPositionDifficulty,
+    setPositionEnabledStages,
+    switchPositionStageImmediately,
+    addPositionExcludedChar,
+    removePositionExcludedChar,
+    regeneratePositionQueueFromCurrent,
+    injectPositionRecommendedWords,
     toggleSound,
     isPracticing,
     startPractice,
@@ -273,6 +286,7 @@ export default function TypingPractice() {
         ms: Number(s?.ms) || 0,
         correct: !!s?.correct,
         at: Number(s?.at) || Date.now(),
+        stage: typeof s?.stage === "string" ? (s.stage as PositionStage | "mixed") : "mixed",
         fromKeys: Array.isArray(s?.fromKeys) ? s.fromKeys : [],
         toKeys: Array.isArray(s?.toKeys) ? s.toKeys : [],
         fromChar: typeof s?.fromChar === "string" ? s.fromChar : "",
@@ -285,59 +299,13 @@ export default function TypingPractice() {
   useEffect(() => {
     localStorage.setItem(POSITION_SAMPLE_KEY, JSON.stringify(positionSamples));
   }, [positionSamples]);
-  const [positionWordBlacklist, setPositionWordBlacklist] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(POSITION_WORD_BLACKLIST_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((w) => typeof w === "string");
-    } catch {
-      return [];
-    }
-  });
-  useEffect(() => {
-    localStorage.setItem(POSITION_WORD_BLACKLIST_KEY, JSON.stringify(positionWordBlacklist));
-  }, [positionWordBlacklist]);
-
   const positionMetrics = useMemo(() => {
-    const total = positionSamples.length;
-    const correct = positionSamples.filter((s) => s.correct).length;
     const transitions = positionSamples.filter((s) => s.correct && s.ms > 0);
-    const transitionCount = transitions.length;
-    const avgMs = transitionCount > 0
-      ? Math.round(transitions.reduce((sum, s) => sum + s.ms, 0) / transitionCount)
-      : 0;
-    const fastCount = transitions.filter((s) => s.ms <= POSITION_FAST_THRESHOLD_MS).length;
-    const fastRate = transitionCount > 0 ? Math.round((fastCount / transitionCount) * 100) : 0;
-    const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
 
-    let currentFastStreak = 0;
-    let bestFastStreak = 0;
-    for (const sample of positionSamples) {
-      if (sample.correct && sample.ms > 0 && sample.ms <= POSITION_FAST_THRESHOLD_MS) {
-        currentFastStreak += 1;
-        bestFastStreak = Math.max(bestFastStreak, currentFastStreak);
-      } else {
-        currentFastStreak = 0;
-      }
-    }
-
-    const speedScore = transitionCount === 0
-      ? 0
-      : avgMs <= 400
-        ? 100
-        : avgMs >= 1600
-          ? 0
-          : Math.round((1600 - avgMs) / 12);
-    const agilityScore = Math.max(
-      0,
-      Math.min(100, Math.round(speedScore * 0.5 + fastRate * 0.35 + accuracy * 0.15))
-    );
-    const level = agilityScore >= 85 ? "A" : agilityScore >= 70 ? "B" : agilityScore >= 55 ? "C" : "D";
-
-    const transitionMap = new Map<string, { sumMs: number; count: number; fastCount: number }>();
+    const transitionMap = new Map<string, { sumMs: number; sumSqMs: number; count: number; fastCount: number }>();
     const transitionContextMap = new Map<string, {
       sumMs: number;
+      sumSqMs: number;
       count: number;
       fastCount: number;
       group: PositionRoleGroup;
@@ -358,8 +326,9 @@ export default function TypingPractice() {
       for (const fromKey of fromKeys) {
         for (const toKey of toKeys) {
           const transitionId = `${fromKey}->${toKey}`;
-          const item = transitionMap.get(transitionId) ?? { sumMs: 0, count: 0, fastCount: 0 };
+          const item = transitionMap.get(transitionId) ?? { sumMs: 0, sumSqMs: 0, count: 0, fastCount: 0 };
           item.sumMs += s.ms;
+          item.sumSqMs += s.ms * s.ms;
           item.count += 1;
           if (s.ms <= POSITION_FAST_THRESHOLD_MS) item.fastCount += 1;
           transitionMap.set(transitionId, item);
@@ -413,6 +382,7 @@ export default function TypingPractice() {
         const contextId = `${ctx.group}:${ctx.fromUnit}->${ctx.toUnit}|FC:${s.fromChar}|TC:${s.toChar}|F:${fromComp.join("+")}|T:${toComp.join("+")}`;
         const contextItem = transitionContextMap.get(contextId) ?? {
           sumMs: 0,
+          sumSqMs: 0,
           count: 0,
           fastCount: 0,
           group: ctx.group,
@@ -426,6 +396,7 @@ export default function TypingPractice() {
           toComp,
         };
         contextItem.sumMs += s.ms;
+        contextItem.sumSqMs += s.ms * s.ms;
         contextItem.count += 1;
         if (s.ms <= POSITION_FAST_THRESHOLD_MS) contextItem.fastCount += 1;
         contextItem.fromKeys = [...new Set([...contextItem.fromKeys, ...ctx.fromKeys])];
@@ -434,11 +405,27 @@ export default function TypingPractice() {
       }
     }
 
+    const calcStdDev = (sumMs: number, sumSqMs: number, count: number): number => {
+      if (count < 2) return 0;
+      const mean = sumMs / count;
+      const variance = Math.max(0, sumSqMs / count - mean * mean);
+      return Math.round(Math.sqrt(variance));
+    };
+    const classifyStability = (avgMs: number, stdDev: number, count: number): "stable_slow" | "unstable" | "fast" => {
+      if (count < 3) return "unstable";
+      if (avgMs <= POSITION_FAST_THRESHOLD_MS) return "fast";
+      // 변동계수(CV) = stdDev / avgMs. 0.3 이상이면 불안정
+      const cv = avgMs > 0 ? stdDev / avgMs : 0;
+      return cv >= 0.3 ? "unstable" : "stable_slow";
+    };
+
     const perTransition = [...transitionMap.entries()]
       .map(([id, v]) => {
         const [from, to] = id.split("->");
         const fromRole = getPositionKeyRole(from);
         const toRole = getPositionKeyRole(to);
+        const avgMs = Math.round(v.sumMs / v.count);
+        const stdDev = calcStdDev(v.sumMs, v.sumSqMs, v.count);
         return {
           id,
           from,
@@ -449,7 +436,9 @@ export default function TypingPractice() {
           toRole,
           fromGroup: getPositionRoleGroup(fromRole),
           toGroup: getPositionRoleGroup(toRole),
-          avgMs: Math.round(v.sumMs / v.count),
+          avgMs,
+          stdDev,
+          stability: classifyStability(avgMs, stdDev, v.count),
           fastRate: Math.round((v.fastCount / v.count) * 100),
           count: v.count,
         };
@@ -457,23 +446,29 @@ export default function TypingPractice() {
       .sort((a, b) => b.avgMs - a.avgMs);
 
     const perTransitionByContext = [...transitionContextMap.entries()]
-      .map(([id, v]) => ({
-        id,
-        group: v.group,
-        fromUnit: v.fromUnit,
-        toUnit: v.toUnit,
-        fromKeys: v.fromKeys,
-        toKeys: v.toKeys,
-        fromChar: v.fromChar,
-        toChar: v.toChar,
-        fromComp: v.fromComp,
-        toComp: v.toComp,
-        fromCompLabel: v.fromComp.join("+"),
-        toCompLabel: v.toComp.join("+"),
-        avgMs: Math.round(v.sumMs / v.count),
-        fastRate: Math.round((v.fastCount / v.count) * 100),
-        count: v.count,
-      }))
+      .map(([id, v]) => {
+        const avgMs = Math.round(v.sumMs / v.count);
+        const stdDev = calcStdDev(v.sumMs, v.sumSqMs, v.count);
+        return {
+          id,
+          group: v.group,
+          fromUnit: v.fromUnit,
+          toUnit: v.toUnit,
+          fromKeys: v.fromKeys,
+          toKeys: v.toKeys,
+          fromChar: v.fromChar,
+          toChar: v.toChar,
+          fromComp: v.fromComp,
+          toComp: v.toComp,
+          fromCompLabel: v.fromComp.join("+"),
+          toCompLabel: v.toComp.join("+"),
+          avgMs,
+          stdDev,
+          stability: classifyStability(avgMs, stdDev, v.count),
+          fastRate: Math.round((v.fastCount / v.count) * 100),
+          count: v.count,
+        };
+      })
       .sort((a, b) => b.avgMs - a.avgMs);
 
     const perKey = [...fromKeyMap.entries()]
@@ -488,15 +483,6 @@ export default function TypingPractice() {
       .sort((a, b) => b.avgMs - a.avgMs);
 
     return {
-      total,
-      correct,
-      transitionCount,
-      avgMs,
-      fastRate,
-      currentFastStreak,
-      bestFastStreak,
-      agilityScore,
-      level,
       perTransition,
       perTransitionByContext,
       perKey,
@@ -511,66 +497,119 @@ export default function TypingPractice() {
   }, [positionMetrics.perKey]);
   const hoveredTransitionKeyIds = useMemo(() => {
     if (!hoveredPositionKeyId) return new Set<string>();
+    const related = positionMetrics.perTransition
+      .filter((row) => row.from === hoveredPositionKeyId || row.to === hoveredPositionKeyId)
+      .sort((a, b) => b.avgMs - a.avgMs);
+    const picked = (related.filter((row) => row.count >= 2).slice(0, POSITION_WEAK_LINK_HIGHLIGHT_LIMIT).length > 0
+      ? related.filter((row) => row.count >= 2).slice(0, POSITION_WEAK_LINK_HIGHLIGHT_LIMIT)
+      : related.slice(0, POSITION_WEAK_LINK_HIGHLIGHT_LIMIT));
     const ids = new Set<string>();
-    for (const row of positionMetrics.perTransition) {
-      if (row.from === hoveredPositionKeyId || row.to === hoveredPositionKeyId) {
-        ids.add(row.from);
-        ids.add(row.to);
-      }
+    for (const row of picked) {
+      ids.add(row.from === hoveredPositionKeyId ? row.to : row.from);
     }
     return ids;
   }, [hoveredPositionKeyId, positionMetrics.perTransition]);
-  const weakPatternWordNotes = useMemo(() => {
-    const blacklistSet = new Set(positionWordBlacklist);
+  const currentPositionSampleStage = useMemo<PositionStage | "mixed">(
+    () => (positionEnabledStages.length === 1 ? positionEnabledStages[0] : "mixed"),
+    [positionEnabledStages]
+  );
+  const activeSingleStage = useMemo<PositionStage | null>(
+    () => (positionEnabledStages.length === 1 ? positionEnabledStages[0] : null),
+    [positionEnabledStages]
+  );
+  const activeStageExcludedChars = useMemo<string[]>(
+    () => (activeSingleStage ? (positionStageExcludedChars[activeSingleStage] ?? []) : []),
+    [activeSingleStage, positionStageExcludedChars]
+  );
+  const stagePositionMetrics = useMemo(() => {
+    const stageOrder: Array<PositionStage | "mixed"> = [...POSITION_STAGE_OPTIONS.map((v) => v.key), "mixed"];
+    return stageOrder.map((stage) => {
+      const samples = positionSamples.filter((s) => s.stage === stage);
+      const transitions = samples.filter((s) => s.correct && s.ms > 0);
+      const avgMs = transitions.length > 0
+        ? Math.round(transitions.reduce((sum, s) => sum + s.ms, 0) / transitions.length)
+        : 0;
+      const fastCount = transitions.filter((s) => s.ms <= POSITION_FAST_THRESHOLD_MS).length;
+      const fastRate = transitions.length > 0 ? Math.round((fastCount / transitions.length) * 100) : 0;
+      return { stage, count: transitions.length, avgMs, fastRate };
+    }).filter((row) => row.count > 0);
+  }, [positionSamples]);
+  const recommendedWordsForPositionRound = useMemo(() => {
     const dictionaryCandidates = `${savedText1}/${savedText2}/${savedText5}`
       .split(/[\s/]+/)
       .map((v) => v.trim())
-      .filter((v) => HANGUL_WORD_ONLY.test(v) && !blacklistSet.has(v));
+      .filter((v) => HANGUL_WORD_2_3.test(v));
     const observedWords = positionSamples
       .filter((s) => s.correct && s.fromChar && s.toChar)
       .map((s) => `${s.fromChar}${s.toChar}`)
-      .filter((v) => HANGUL_WORD_ONLY.test(v) && !blacklistSet.has(v));
-    const candidates = [...new Set([...dictionaryCandidates, ...observedWords])];
-    const topPatterns = positionMetrics.perTransitionByContext.slice(0, 24);
-    return topPatterns.map((pattern) => {
-      const matches: string[] = [];
-      const seen = new Set<string>();
-      for (const word of candidates) {
-        const chars = [...word];
-        let ok = false;
-        for (let i = 1; i < chars.length; i++) {
-          const fromUnit = getGroupUnitForChar(chars[i - 1], pattern.group);
-          const toUnit = getGroupUnitForChar(chars[i], pattern.group);
-          if (fromUnit === pattern.fromUnit && toUnit === pattern.toUnit) {
-            ok = true;
-            break;
-          }
-        }
-        if (ok && !seen.has(word)) {
-          seen.add(word);
-          matches.push(word);
-        }
-        if (matches.length >= 8) break;
-      }
-      return { pattern, matches };
-    }).filter((row) => row.matches.length > 0);
-  }, [positionMetrics.perTransitionByContext, positionSamples, positionWordBlacklist]);
-  const weakPracticeWords = useMemo(() => {
-    const words = weakPatternWordNotes.flatMap((row) => row.matches.slice(0, 3));
-    return [...new Set(words)].slice(0, 60);
-  }, [weakPatternWordNotes]);
-  const applyWeakPracticeWords = () => {
-    if (weakPracticeWords.length === 0) return;
-    setPracticeText(weakPracticeWords.join(" "));
-    updateInputText(weakPracticeWords.join("/"));
-  };
-  const addWordToBlacklist = (word: string) => {
-    const target = word.trim();
-    if (!target) return;
-    setPositionWordBlacklist((prev) => (prev.includes(target) ? prev : [...prev, target]));
-  };
-  const clearWordBlacklist = () => setPositionWordBlacklist([]);
+      .filter((v) => HANGUL_WORD_2_3.test(v));
+    const unique = [...new Set([...observedWords, ...dictionaryCandidates])];
 
+    // 약점 전환 패턴 수집: 불안정(자리 미숙) > 안정적으로 느림(물리적 어려움) 순
+    const weakTransitions = positionMetrics.perTransitionByContext
+      .filter((r) => r.stability !== "fast" && r.count >= 2);
+    const unstableSet = new Set(
+      weakTransitions.filter((r) => r.stability === "unstable").map((r) => `${r.fromChar}${r.toChar}`)
+    );
+    const stableSlowSet = new Set(
+      weakTransitions.filter((r) => r.stability === "stable_slow").map((r) => `${r.fromChar}${r.toChar}`)
+    );
+
+    // 단어별 약점 점수 계산: 불안정 패턴 포함 = 2점, 안정느림 포함 = 1점
+    const scoreWord = (word: string): number => {
+      let score = 0;
+      for (let i = 0; i < word.length - 1; i++) {
+        const pair = word[i] + word[i + 1];
+        if (unstableSet.has(pair)) score += 2;
+        else if (stableSlowSet.has(pair)) score += 1;
+      }
+      return score;
+    };
+
+    const scored = unique.map((word) => ({ word, score: scoreWord(word) }));
+    scored.sort((a, b) => b.score - a.score);
+
+    // 점수 높은 순으로 뽑되, 연쇄(끝글자=다음첫글자) 방지
+    const pickedWords: string[] = [];
+    for (const { word } of scored) {
+      const prev = pickedWords[pickedWords.length - 1];
+      const isChained = !!prev && prev[prev.length - 1] === word[0];
+      if (!isChained) {
+        pickedWords.push(word);
+      }
+      if (pickedWords.length >= POSITION_RECOMMENDED_SOURCE_WORD_COUNT) break;
+    }
+    if (pickedWords.length < POSITION_RECOMMENDED_SOURCE_WORD_COUNT) {
+      for (const { word } of scored) {
+        if (!pickedWords.includes(word)) {
+          pickedWords.push(word);
+        }
+        if (pickedWords.length >= POSITION_RECOMMENDED_SOURCE_WORD_COUNT) break;
+      }
+    }
+
+    // 2~3글자 추천 단어를 1글자 문제로 분해해서 사용
+    const toChars = (words: string[]): string[] =>
+      words.flatMap((w) => [...w].filter((ch) => HANGUL_CHAR.test(ch)));
+
+    const pickedChars = toChars(pickedWords);
+    return pickedChars.slice(0, POSITION_RECOMMENDED_MAX_COUNT);
+  }, [positionSamples, positionMetrics.perTransitionByContext]);
+  const positionRecommendedInjectedRef = useRef(false);
+  useEffect(() => {
+    if (!isPositionMode || !isPracticing) {
+      positionRecommendedInjectedRef.current = false;
+      return;
+    }
+    if (progressCount === 0) {
+      positionRecommendedInjectedRef.current = false;
+    }
+    if (progressCount < POSITION_BASE_QUESTION_COUNT) return;
+    if (positionRecommendedInjectedRef.current) return;
+
+    injectPositionRecommendedWords(recommendedWordsForPositionRound);
+    positionRecommendedInjectedRef.current = true;
+  }, [isPositionMode, isPracticing, progressCount, recommendedWordsForPositionRound]);
   const prevReviewActiveRef = useRef(false);
   const prevReviewTypeRef = useRef<string | null>(null);
 
@@ -609,6 +648,8 @@ export default function TypingPractice() {
   // 재개 직후 하이라이트 표시용
   const [showResumeHighlight, setShowResumeHighlight] = useState(false);
   const [resumePosition, setResumePosition] = useState(0);
+  const prevPositionProgressRef = useRef(0);
+  const [positionCycleToast, setPositionCycleToast] = useState<string | null>(null);
 
 
   // 드로어 열림/닫힘 상태
@@ -664,7 +705,7 @@ export default function TypingPractice() {
   }, []);
 
 
-  // 단어/문장 모드 라운드 완료 감지
+  // 단어/문장/자리 모드 라운드 완료 감지
   useEffect(() => {
     // 복습 중에는 라운드 완료 방지
     if (isReviewActive) return;
@@ -710,6 +751,23 @@ export default function TypingPractice() {
       incrementCompletedRounds(practiceSlot, false);
     }
   }, [progressCount, totalCount, mode, isPracticing, isReviewActive]);
+
+  // 자리모드 자동 반복: 40개 완료 후 즉시 0으로 리셋되므로 완료 횟수를 별도로 반영
+  useEffect(() => {
+    if (!isPositionMode || !isPracticing || totalCount <= 0) {
+      prevPositionProgressRef.current = progressCount;
+      return;
+    }
+
+    const prev = prevPositionProgressRef.current;
+    const justCompletedCycle = prev === totalCount - 1 && progressCount === 0;
+    if (justCompletedCycle) {
+      incrementCompletedRounds(practiceSlot, false);
+      setPositionCycleToast("사이클 완료! 다음 라운드 시작");
+      setTimeout(() => setPositionCycleToast(null), 2000);
+    }
+    prevPositionProgressRef.current = progressCount;
+  }, [isPositionMode, isPracticing, totalCount, progressCount, incrementCompletedRounds, practiceSlot]);
 
 
   // 카운트다운 시작 함수
@@ -868,12 +926,18 @@ export default function TypingPractice() {
     reader.readAsText(file, "UTF-8");
   };
 
-  const recordPositionTransition = (isCorrect: boolean, elapsedMs: number, fromChar: string, toChar: string) => {
+  const recordPositionTransition = (
+    isCorrect: boolean,
+    elapsedMs: number,
+    fromChar: string,
+    toChar: string,
+    stage: PositionStage | "mixed"
+  ) => {
     const safeMs = Number.isFinite(elapsedMs) && elapsedMs > 0 ? Math.round(elapsedMs) : 0;
     const fromKeys = getPositionKeyIdsForChar(fromChar);
     const toKeys = getPositionKeyIdsForChar(toChar);
     setPositionSamples((prev) => {
-      const next = [...prev, { ms: safeMs, correct: isCorrect, at: Date.now(), fromKeys, toKeys, fromChar, toChar }];
+      const next = [...prev, { ms: safeMs, correct: isCorrect, at: Date.now(), stage, fromKeys, toKeys, fromChar, toChar }];
       return next.length > POSITION_SAMPLE_LIMIT ? next.slice(next.length - POSITION_SAMPLE_LIMIT) : next;
     });
   };
@@ -936,7 +1000,7 @@ export default function TypingPractice() {
         if (isPositionMode) {
           const fromChar = currentWordIndex > 0 ? shuffledWords[currentWordIndex - 1] : "";
           const toChar = shuffledWords[currentWordIndex] || "";
-          recordPositionTransition(isCorrect, elapsedMs, fromChar, toChar);
+          recordPositionTransition(isCorrect, elapsedMs, fromChar, toChar, currentPositionSampleStage);
         }
         if (mode === "words") {
           recordResult(targetClean, isCorrect);
@@ -951,6 +1015,23 @@ export default function TypingPractice() {
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (isPositionMode && isPracticing && event.key === " ") {
+      event.preventDefault();
+      if (!activeSingleStage) return;
+      const currentChar = shuffledWords[currentWordIndex] ?? "";
+      if (!currentChar) return;
+      const isAlreadyExcluded = activeStageExcludedChars.includes(currentChar);
+      if (isAlreadyExcluded) {
+        removePositionExcludedChar(activeSingleStage, currentChar);
+        regeneratePositionQueueFromCurrent();
+      } else {
+        addPositionExcludedChar(activeSingleStage, currentChar);
+        // 현재 문제도 바로 교체되도록 현재 인덱스부터 재생성
+        regeneratePositionQueueFromCurrent();
+      }
+      return;
+    }
+
     if (event.key === "Enter") {
       // 연습 시작 전 99+엔터: 원문이 있는 슬롯 중 랜덤으로 연습 시작
       if (!isPracticing && typedWord.trim() === "99") {
@@ -1127,7 +1208,7 @@ export default function TypingPractice() {
         if (isPositionMode) {
           const fromChar = currentWordIndex > 0 ? shuffledWords[currentWordIndex - 1] : "";
           const toChar = shuffledWords[currentWordIndex] || "";
-          recordPositionTransition(isCorrect, elapsedMs, fromChar, toChar);
+          recordPositionTransition(isCorrect, elapsedMs, fromChar, toChar, currentPositionSampleStage);
         }
       }
       submitAnswer(typedWord);
@@ -1883,8 +1964,8 @@ export default function TypingPractice() {
         {/* 드로어 */}
         <div className={`transition-all duration-300 overflow-hidden flex-shrink-0 ${isDrawerOpen ? "w-96" : "w-0"}`}>
           <div className="w-96 space-y-4 pr-4">
-            {/* 슬롯 버튼 (words/sentences 모드) */}
-            {mode !== "random" && (
+            {/* 슬롯 버튼 (words/sentences 모드, 자리모드 제외) */}
+            {mode !== "random" && !isPositionMode && (
               <div className="space-y-2">
                 <div className="grid grid-cols-4 gap-1.5">
                   {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => {
@@ -2293,12 +2374,12 @@ export default function TypingPractice() {
               )}
             </>
           )}
-          {(mode === "words" || mode === "sentences") && inputText.trim() && (
+          {(mode === "words" || mode === "sentences") && !isPositionMode && inputText.trim() && (
             <p className="text-xs text-gray-500">
               단어 {inputText.trim().split("/").filter(Boolean).length}개
             </p>
           )}
-          {mode !== "random" && (
+          {mode !== "random" && !isPositionMode && (
             <textarea
               className="w-full p-2 border rounded"
               rows={25}
@@ -2434,7 +2515,7 @@ export default function TypingPractice() {
                       </span>
                       {isFullyComplete && practiceSlot !== null && (
                         <span className="text-teal-600 font-semibold">
-                          {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} ({isBatchMode ? '매매치라' : '보교치라'}) : {((isBatchMode ? slotCompletedRoundsBatch[practiceSlot] : slotCompletedRoundsNormal[practiceSlot]) || 0) + 1}회 완료
+                          {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} ({isBatchMode ? '매매치라' : '보고치라'}) : {((isBatchMode ? slotCompletedRoundsBatch[practiceSlot] : slotCompletedRoundsNormal[practiceSlot]) || 0) + 1}회 완료
                         </span>
                       )}
                     </>
@@ -2509,7 +2590,7 @@ export default function TypingPractice() {
                     {mode !== "longtext" && (
                     <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-3xl">
                       {(() => {
-                        // 보교치라 횟수
+                        // 보고치라 횟수
                         const normalRounds = { ...slotCompletedRoundsNormal };
                         // 매매치라 횟수
                         const batchRounds = { ...slotCompletedRoundsBatch };
@@ -3075,25 +3156,53 @@ export default function TypingPractice() {
             <div className="min-h-[200px] p-4 border rounded bg-gray-50">
               {isPositionMode && (
                 <div className="rounded-2xl border border-amber-300 bg-gradient-to-b from-amber-50 to-amber-100 p-4">
-                  <div className="flex items-center justify-center gap-2 mb-4">
-                    {([
-                      ["beginner", "초급"],
-                      ["intermediate", "중급"],
-                      ["advanced", "고급"],
-                      ["random", "랜덤"],
-                    ] as const).map(([key, label]) => (
-                      <button
-                        key={key}
-                        onClick={() => setPositionDifficulty(key)}
-                        className={`px-3 py-1 rounded border text-xs ${
-                          positionDifficulty === key
-                            ? "bg-emerald-600 text-white border-emerald-700"
-                            : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                  <div className="mb-2 flex justify-start">
+                    <button
+                      onClick={() => {
+                        const allStageKeys = POSITION_STAGE_OPTIONS.map((s) => s.key);
+                        const isAllSelected = allStageKeys.every((k) => positionEnabledStages.includes(k));
+                        setPositionEnabledStages(isAllSelected ? [POSITION_STAGE_OPTIONS[0].key] : allStageKeys);
+                      }}
+                      className="px-2 py-1 rounded border text-xs bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                    >
+                      단계 전체선택
+                    </button>
+                  </div>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    {!activeSingleStage && (
+                      <span className="text-[11px] text-gray-500">단계 1개 선택 시 사용 가능</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-5 md:grid-cols-10 gap-1 mb-4 max-w-[920px] mx-auto">
+                    {POSITION_STAGE_OPTIONS.map(({ key, label, numLabel, btnLabel }) => {
+                      const enabled = positionEnabledStages.includes(key);
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => {
+                            if (isPositionMode && isPracticing) {
+                              switchPositionStageImmediately(key);
+                              return;
+                            }
+                            if (enabled && positionEnabledStages.length === 1) return;
+                            setPositionEnabledStages(
+                              enabled
+                                ? positionEnabledStages.filter((k) => k !== key)
+                                : [...positionEnabledStages, key]
+                            );
+                          }}
+                          className={`h-9 rounded border text-[10px] leading-tight font-semibold text-center ${
+                            enabled
+                              ? "bg-emerald-600 text-white border-emerald-700"
+                              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                          }`}
+                          title={label}
+                        >
+                          <div>{numLabel}</div>
+                          <div>{btnLabel}</div>
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="grid grid-cols-10 gap-1.5 max-w-[920px] mx-auto mb-4">
                     {Array.from({ length: 30 }, (_, offset) => offset).map((offset) => {
@@ -3126,19 +3235,30 @@ export default function TypingPractice() {
                                 {row.map((keyDef, colIdx) => (
                                   <div
                                     key={`position-key-${sideIdx}-${rowIdx}-${colIdx}`}
-                                    className={`h-14 rounded-xl border flex flex-col items-center justify-center bg-white border-gray-300 text-gray-800 cursor-pointer transition-all duration-150 ${
+                                    className={`h-14 rounded-xl border flex flex-col items-center justify-center bg-white border-gray-300 cursor-pointer transition-all duration-150 ${
                                       hoveredPositionKeyId === keyDef.id
-                                        ? "bg-rose-500 text-white border-rose-700 ring-4 ring-rose-200 shadow-lg scale-105"
+                                        ? "bg-gray-900 text-white border-black ring-4 ring-gray-300 shadow-lg scale-105"
                                         : hoveredTransitionKeyIds.has(keyDef.id)
-                                          ? "bg-amber-300 text-gray-900 border-amber-500 ring-2 ring-amber-100 shadow"
-                                          : ""
+                                          ? "bg-rose-500 text-white border-rose-700 ring-2 ring-rose-200 shadow"
+                                          : "text-gray-800"
                                     }`}
                                     onMouseEnter={() => setHoveredPositionKeyId(keyDef.id)}
                                     onMouseLeave={() => setHoveredPositionKeyId(null)}
                                   >
-                                    <div className="text-lg font-semibold leading-none">{keyDef.label}</div>
-                                    <div className="text-[10px] leading-tight text-gray-500 mt-1">
-                                      {positionPerKeyMap.get(keyDef.id)?.avgMs ? `${positionPerKeyMap.get(keyDef.id)!.avgMs}ms` : "-"}
+                                    <div
+                                      className="text-lg font-semibold leading-none"
+                                      style={{
+                                        color: "#000000",
+                                        textShadow: "none",
+                                      }}
+                                    >
+                                      {keyDef.label}
+                                    </div>
+                                    <div className="text-[10px] leading-tight mt-1 text-black"
+                                    style={{
+                                      textShadow: "none",
+                                    }}>
+                                      {(() => { const m = positionPerKeyMap.get(keyDef.id); return m != null ? `${m.avgMs}ms` : "-"; })()}
                                     </div>
                                   </div>
                                 ))}
@@ -3152,19 +3272,30 @@ export default function TypingPractice() {
                           {POSITION_THUMB_ROW.map((keyDef, idx) => (
                             <div
                               key={`position-thumb-${idx}`}
-                              className={`h-14 rounded-xl border flex flex-col items-center justify-center bg-white border-gray-300 text-gray-800 cursor-pointer transition-all duration-150 ${
+                              className={`h-14 rounded-xl border flex flex-col items-center justify-center bg-white border-gray-300 cursor-pointer transition-all duration-150 ${
                                 hoveredPositionKeyId === keyDef.id
-                                  ? "bg-rose-500 text-white border-rose-700 ring-4 ring-rose-200 shadow-lg scale-105"
+                                  ? "bg-gray-900 text-white border-black ring-4 ring-gray-300 shadow-lg scale-105"
                                   : hoveredTransitionKeyIds.has(keyDef.id)
-                                    ? "bg-amber-300 text-gray-900 border-amber-500 ring-2 ring-amber-100 shadow"
-                                    : ""
+                                    ? "bg-rose-500 text-white border-rose-700 ring-2 ring-rose-200 shadow"
+                                    : "text-gray-800"
                               }`}
                               onMouseEnter={() => setHoveredPositionKeyId(keyDef.id)}
                               onMouseLeave={() => setHoveredPositionKeyId(null)}
                             >
-                              <div className="text-lg font-semibold leading-none">{keyDef.label}</div>
-                              <div className="text-[10px] leading-tight text-gray-500 mt-1">
-                                {positionPerKeyMap.get(keyDef.id)?.avgMs ? `${positionPerKeyMap.get(keyDef.id)!.avgMs}ms` : "-"}
+                              <div
+                                className="text-lg font-semibold leading-none"
+                                style={{
+                                  color: "#000000",
+                                  textShadow: "none",
+                                }}
+                              >
+                                {keyDef.label}
+                              </div>
+                              <div className="text-[10px] leading-tight mt-1 text-black"
+                              style={{
+                                textShadow: "none",
+                              }}>
+                                {(() => { const m = positionPerKeyMap.get(keyDef.id); return m != null ? `${m.avgMs}ms` : "-"; })()}
                               </div>
                             </div>
                           ))}
@@ -3232,6 +3363,11 @@ export default function TypingPractice() {
             </div>
           )}
 
+          {positionCycleToast && (
+            <div className="text-center py-1.5 px-4 rounded-full bg-emerald-500 text-white text-sm font-semibold animate-pulse">
+              {positionCycleToast}
+            </div>
+          )}
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
             <>
               <input
@@ -3245,29 +3381,40 @@ export default function TypingPractice() {
                 onKeyDown={handleKeyDown}
               />
 
-              <p className="text-sm font-medium">
-                <span className="text-blue-600">정답: {correctCount}</span> |{" "}
-                <span className="text-rose-600">오답: {incorrectCount}</span> |
-                진행: {mode === "position" ? progressCount : `${progressCount} / ${mode === "sentences" && generatedCount > 0 ? generatedCount : totalCount}`}
-                {isReviewActive && mode === "words" && (
-                  <> | <span className={`font-bold ${reviewType === "failed" ? "text-amber-700" : "text-orange-600"}`}>{reviewType === "failed" ? "2차복습" : "1차복습"}: {currentReviewIndex + 1}/{reviewWords.length}</span></>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">
+                  <span className="text-blue-600">정답: {correctCount}</span> |{" "}
+                  <span className="text-rose-600">오답: {incorrectCount}</span> |
+                  진행: {totalCount > 0 ? `${progressCount} / ${totalCount}` : progressCount}
+                  {isPositionMode && isPracticing && (
+                    <> | <span className="text-emerald-600 font-semibold">{positionEnabledStages.length === 1
+                      ? (POSITION_STAGE_OPTIONS.find((v) => v.key === positionEnabledStages[0])?.label ?? positionEnabledStages[0])
+                      : `${positionEnabledStages.length}단계 혼합`
+                    }</span></>
+                  )}
+                  {isReviewActive && mode === "words" && (
+                    <> | <span className={`font-bold ${reviewType === "failed" ? "text-amber-700" : "text-orange-600"}`}>{reviewType === "failed" ? "2차복습" : "1차복습"}: {currentReviewIndex + 1}/{reviewWords.length}</span></>
+                  )}
+                </p>
+                {isPositionMode && isPracticing && activeSingleStage && (
+                  <span className="text-[11px] text-gray-400">스페이스: 현재 글자 제외/해제</span>
                 )}
-              </p>
+              </div>
 
-              {isWordLikeMode && (
+              {mode === "words" && (
                 <div className="flex gap-2 mt-1">
                   <button
                     onClick={() => {
                       const next = !showProficiencyPanel;
                       setShowProficiencyPanel(next);
-                      if (next && mode === "words") {
+                      if (next) {
                         refreshToday();
                         refreshOverall();
                       }
                     }}
                     className={`text-xs px-3 py-1 rounded border ${showProficiencyPanel ? 'bg-blue-500 text-white border-blue-500' : 'bg-white border-gray-300 hover:bg-gray-100'}`}
                   >
-                    {isPositionMode ? "자리 숙련도" : "숙련도"}
+                    숙련도
                   </button>
                 </div>
               )}
@@ -3284,149 +3431,129 @@ export default function TypingPractice() {
                   onClose={() => setShowProficiencyPanel(false)}
                 />
               )}
-              {showProficiencyPanel && isPositionMode && (
-                <div className="border rounded p-4 bg-white space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold">자리 전환 숙련도</h3>
-                    <button onClick={() => setShowProficiencyPanel(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-                  </div>
-                  {hoveredPositionKeyId && (
-                    <div className="text-xs text-amber-700">
-                      선택 키: <span className="font-semibold">{POSITION_KEY_LABEL[hoveredPositionKeyId] || hoveredPositionKeyId}</span>
-                    </div>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("initial")}`}>초성 (왼손)</span>
-                    <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("vowel_left_thumb")}`}>중성 (양엄지)</span>
-                    <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("final")}`}>종성 (오른손)</span>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <div className="text-sm font-semibold mb-1">동시 조합별 약점</div>
-                      <div className="max-h-80 overflow-y-auto border rounded">
-                        {positionMetrics.perTransitionByContext.length === 0 ? (
-                          <div className="p-2 text-xs text-gray-400">데이터 없음</div>
-                        ) : (
-                          positionMetrics.perTransitionByContext.slice(0, 80).map((row) => (
-                            <div
-                              key={row.id}
-                              className={`px-2 py-1 text-xs border-b last:border-b-0 transition ${
-                                !hoveredPositionKeyId
-                                  ? ""
-                                  : (row.fromKeys.includes(hoveredPositionKeyId) || row.toKeys.includes(hoveredPositionKeyId))
-                                    ? "bg-amber-100"
-                                    : "opacity-40"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-medium flex items-center gap-1">
-                                  <span className={`px-1.5 py-0.5 rounded border ${getPositionGroupColorClass(row.group)}`}>{row.fromUnit}</span>
-                                  <span className="text-gray-400">→</span>
-                                  <span className={`px-1.5 py-0.5 rounded border ${getPositionGroupColorClass(row.group)}`}>{row.toUnit}</span>
-                                </span>
-                                <span className="text-gray-600">평균 {row.avgMs}ms | 빠른 {row.fastRate}% | {row.count}회</span>
-                              </div>
-                              <div className="mt-0.5 text-[11px] text-gray-500">
-                                글자: {row.fromChar || "-"} → {row.toChar || "-"}
-                              </div>
-                            </div>
-                          ))
-                        )}
+              {isPositionMode && (
+                <div className="mt-2">
+                    <div className="border rounded p-4 bg-white space-y-3">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-semibold">자리 전환 숙련도</h3>
+                        <button
+                          onClick={() => setPositionSamples([])}
+                          className="text-xs px-3 py-1.5 rounded border text-red-600 border-red-300 hover:bg-red-50"
+                        >
+                          초기화
+                        </button>
                       </div>
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold mb-1">오답노트</div>
-                      <div className="mb-2 p-2 border rounded bg-gray-50">
-                        <div className="text-[11px] text-gray-500 mb-1">추천 연습단어</div>
-                        <div className="text-xs text-gray-700 leading-relaxed">
-                          {weakPracticeWords.length > 0 ? (
-                            <div className="flex flex-wrap gap-1.5">
-                              {weakPracticeWords.slice(0, 18).map((word) => (
-                                <span key={`weak-word-${word}`} className="relative inline-flex items-center px-1.5 py-0.5 pr-3 border rounded bg-white">
-                                  <span>{word}</span>
-                                  <button
-                                    onClick={() => addWordToBlacklist(word)}
-                                    className="absolute -top-1 -right-1 text-[9px] leading-none w-3.5 h-3.5 rounded-full border border-gray-300 bg-white text-gray-500 hover:bg-gray-100"
-                                    aria-label={`${word} 제외`}
-                                    title="제외"
-                                  >
-                                    x
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
-                          ) : "데이터 없음"}
+                      {hoveredPositionKeyId && (
+                        <div className="text-xs text-amber-700">
+                          선택 키: <span className="font-semibold">{POSITION_KEY_LABEL[hoveredPositionKeyId] || hoveredPositionKeyId}</span>
                         </div>
-                        <div className="mt-2 flex gap-2">
-                          <button
-                            onClick={applyWeakPracticeWords}
-                            disabled={weakPracticeWords.length === 0}
-                            className="text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40"
-                          >
-                            연습단어 넣기
-                          </button>
-                          <button
-                            onClick={clearWordBlacklist}
-                            disabled={positionWordBlacklist.length === 0}
-                            className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-40"
-                          >
-                            제외목록 초기화 ({positionWordBlacklist.length})
-                          </button>
-                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("initial")}`}>초성 (왼손)</span>
+                        <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("vowel_left_thumb")}`}>중성 (양엄지)</span>
+                        <span className={`px-2 py-0.5 rounded border ${getPositionRoleColorClass("final")}`}>종성 (오른손)</span>
                       </div>
-                      <div className="max-h-80 overflow-y-auto border rounded">
-                        {weakPatternWordNotes.length === 0 ? (
-                          <div className="p-2 text-xs text-gray-400">데이터 없음</div>
-                        ) : (
-                          weakPatternWordNotes.map((row) => (
-                            <div
-                              key={row.pattern.id}
-                              className={`px-2 py-1 text-xs border-b last:border-b-0 transition ${
-                                !hoveredPositionKeyId
-                                  ? ""
-                                  : [...row.pattern.fromKeys, ...row.pattern.toKeys].includes(hoveredPositionKeyId)
-                                    ? "bg-amber-100"
-                                    : "opacity-40"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-medium">
-                                  패턴: {row.pattern.fromUnit} → {row.pattern.toUnit}
-                                </span>
-                                <span className="text-gray-600">연습 {row.pattern.count}회</span>
-                              </div>
-                              <div className="mt-0.5 text-[11px] text-gray-500">
-                                추천 단어:
-                                <span className="ml-1 inline-flex flex-wrap gap-1">
-                                  {row.matches.map((word) => (
-                                    <span key={`${row.pattern.id}-${word}`} className="relative inline-flex items-center px-1 py-0.5 pr-3 border rounded bg-white">
-                                      <span>{word}</span>
-                                      <button
-                                        onClick={() => addWordToBlacklist(word)}
-                                        className="absolute -top-1 -right-1 text-[9px] leading-none w-3.5 h-3.5 rounded-full border border-gray-300 bg-white text-gray-500 hover:bg-gray-100"
-                                        aria-label={`${word} 제외`}
-                                        title="제외"
-                                      >
-                                        x
-                                      </button>
+                      <div className="text-xs text-gray-600">
+                        위 키 배열에서 키를 hover하면 느린 전환 키가 노란색으로 강조됩니다.
+                      </div>
+                      <div className="grid grid-cols-3 gap-3 items-start">
+                        {/* 왼쪽: 자리전환숙련도 */}
+                        <div className="space-y-3">
+                          <div className="border rounded bg-gray-50 p-2">
+                            <div className="text-sm font-semibold mb-1">단계별 자리전환숙련도</div>
+                            {stagePositionMetrics.length === 0 ? (
+                              <div className="text-xs text-gray-500">데이터 없음</div>
+                            ) : (
+                              <div className="space-y-1">
+                                {stagePositionMetrics.map((row) => (
+                                  <div key={`stage-position-metric-${row.stage}`} className="text-xs flex items-center justify-between gap-2">
+                                    <span className="font-medium">
+                                      {row.stage === "mixed"
+                                        ? "복합선택"
+                                        : (POSITION_STAGE_OPTIONS.find((v) => v.key === row.stage)?.label ?? row.stage)}
                                     </span>
-                                  ))}
-                                </span>
+                                    <span className="text-gray-600">{row.avgMs}ms | 빠른 {row.fastRate}% | {row.count}회</span>
+                                  </div>
+                                ))}
                               </div>
+                            )}
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold mb-1">동시 조합별 약점</div>
+                            <div className="max-h-80 overflow-y-auto border rounded">
+                              {positionMetrics.perTransitionByContext.length === 0 ? (
+                                <div className="p-2 text-xs text-gray-400">데이터 없음</div>
+                              ) : (
+                                positionMetrics.perTransitionByContext.slice(0, 80).map((row) => (
+                                  <div
+                                    key={row.id}
+                                    className={`px-2 py-1 text-xs border-b last:border-b-0 transition ${
+                                      !hoveredPositionKeyId
+                                        ? ""
+                                        : (row.fromKeys.includes(hoveredPositionKeyId) || row.toKeys.includes(hoveredPositionKeyId))
+                                          ? "bg-amber-100"
+                                          : "opacity-40"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-medium flex items-center gap-1">
+                                        <span className={`px-1.5 py-0.5 rounded border ${getPositionGroupColorClass(row.group)}`}>{row.fromUnit}</span>
+                                        <span className="text-gray-400">→</span>
+                                        <span className={`px-1.5 py-0.5 rounded border ${getPositionGroupColorClass(row.group)}`}>{row.toUnit}</span>
+                                      </span>
+                                      <span className="text-gray-600 flex items-center gap-1">
+                                        {row.stability === "unstable" && <span className="px-1 py-0.5 text-[10px] rounded bg-amber-100 text-amber-700 border border-amber-300">불안정</span>}
+                                        {row.stability === "stable_slow" && <span className="px-1 py-0.5 text-[10px] rounded bg-blue-100 text-blue-700 border border-blue-300">느림</span>}
+                                        평균 {row.avgMs}ms ±{row.stdDev} | 빠른 {row.fastRate}% | {row.count}회
+                                      </span>
+                                    </div>
+                                    <div className="mt-0.5 text-[11px] text-gray-500">
+                                      글자: {row.fromChar || "-"} → {row.toChar || "-"}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
                             </div>
-                          ))
-                        )}
+                          </div>
+                        </div>
+                        {/* 가운데: 제외목록 */}
+                        <div>
+                          <div className="border rounded bg-gray-50 p-2">
+                            <div className="text-sm font-semibold mb-1">제외목록</div>
+                            {activeSingleStage ? (
+                              <>
+                                <div className="text-xs text-gray-600 mb-1">
+                                  현재 단계: {POSITION_STAGE_OPTIONS.find((v) => v.key === activeSingleStage)?.label ?? activeSingleStage}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {activeStageExcludedChars.length > 0 ? (
+                                    activeStageExcludedChars.map((char) => (
+                                      <button
+                                        key={`excluded-panel-char-${activeSingleStage}-${char}`}
+                                        onClick={() => {
+                                          removePositionExcludedChar(activeSingleStage, char);
+                                          regeneratePositionQueueFromCurrent();
+                                        }}
+                                        className="px-2 py-1 rounded border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-sm"
+                                        title="클릭하면 제외 해제"
+                                      >
+                                        {char}
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <span className="text-sm text-gray-500">현재 단계 제외 글자 없음</span>
+                                  )}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-sm text-gray-500">단계 1개를 선택하면 해당 단계 제외목록이 표시됩니다.</div>
+                            )}
+                          </div>
+                        </div>
+                        {/* 오른쪽: 빈 칸 (예비) */}
+                        <div />
                       </div>
                     </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setPositionSamples([])}
-                      className="text-xs px-3 py-1.5 rounded border text-red-600 border-red-300 hover:bg-red-50"
-                    >
-                      자리숙련도 초기화
-                    </button>
-                  </div>
                 </div>
               )}
             </>
