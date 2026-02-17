@@ -12,6 +12,8 @@ import { useAIGeneration } from "../hooks/useAIGeneration";
 import { useSlotManager } from "../hooks/useSlotManager";
 import { useWordReview } from "../hooks/useWordReview";
 import { useWordProficiency } from "../hooks/useWordProficiency";
+import { useAuth } from "../hooks/useAuth";
+import LoginPage from "./LoginPage";
 import WordProficiencyPanel from "./WordProficiencyPanel";
 
 type PositionKeyDef = { id: string; label: string };
@@ -194,6 +196,8 @@ export default function TypingPractice() {
     setTotalCount,
     resumeSentencePractice,
   } = useTypingStore();
+  const { user, signOut } = useAuth();
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const isPositionMode = mode === "position";
   const isWordLikeMode = mode === "words" || mode === "position";
 
@@ -1858,6 +1862,21 @@ export default function TypingPractice() {
             듣고 치라
           </button>
         </div>
+        {user ? (
+          <button
+            onClick={signOut}
+            className="ml-auto px-4 py-2 rounded bg-gray-300 hover:bg-gray-400"
+          >
+            로그아웃
+          </button>
+        ) : (
+          <button
+            onClick={() => setShowLoginModal(true)}
+            className="ml-auto px-4 py-2 rounded bg-blue-500 text-white hover:bg-blue-600"
+          >
+            로그인
+          </button>
+        )}
       </div>
 
       <div className="flex flex-row gap-0">
@@ -3414,6 +3433,9 @@ export default function TypingPractice() {
           )}
         </div>
       </div>
+      {showLoginModal && (
+        <LoginPage onClose={() => setShowLoginModal(false)} />
+      )}
     </div>
   );
 }
