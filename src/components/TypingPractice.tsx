@@ -103,8 +103,10 @@ type PositionSample = {
 };
 
 const POSITION_SAMPLE_KEY = "position_transition_samples";
+const POSITION_OVERALL_SAMPLE_KEY = "position_transition_samples_overall";
 const POSITION_FAST_THRESHOLD_MS = 900;
 const POSITION_SAMPLE_LIMIT = 200;
+const POSITION_OVERALL_SAMPLE_LIMIT = 2000;
 const HANGUL_CHAR = /^[가-힣]$/;
 const HANGUL_WORD_2_3 = /^[가-힣]{2,3}$/;
 const POSITION_RECOMMENDED_SOURCE_WORD_COUNT = 10;
@@ -248,6 +250,7 @@ export default function TypingPractice() {
   const [batchSize, setBatchSize] = useState(5); // 한번에 보여줄 글자 수
   const [batchStartIndex, setBatchStartIndex] = useState(0); // 현재 배치 시작 인덱스
   const [currentBatchChars, setCurrentBatchChars] = useState<string>(""); // 현재 배치에 표시된 글자들
+  const [batchRandomFillCount, setBatchRandomFillCount] = useState(0); // 마지막 배치에서 랜덤으로 채운 글자 수
 
   // 복습 모드 상태 (시간 많이 걸린 5개 다시 연습)
   const [isReviewMode, setIsReviewMode] = useState(false); // 복습 모드 여부
@@ -299,8 +302,30 @@ export default function TypingPractice() {
   useEffect(() => {
     localStorage.setItem(POSITION_SAMPLE_KEY, JSON.stringify(positionSamples));
   }, [positionSamples]);
-  const positionMetrics = useMemo(() => {
-    const transitions = positionSamples.filter((s) => s.correct && s.ms > 0);
+  const [overallPositionSamples, setOverallPositionSamples] = useState<PositionSample[]>(() => {
+    try {
+      const raw = localStorage.getItem(POSITION_OVERALL_SAMPLE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((s: Record<string, unknown>) => ({
+        ms: Number(s?.ms) || 0,
+        correct: !!s?.correct,
+        at: Number(s?.at) || Date.now(),
+        stage: typeof s?.stage === "string" ? (s.stage as PositionStage | "mixed") : "mixed",
+        fromKeys: Array.isArray(s?.fromKeys) ? s.fromKeys : [],
+        toKeys: Array.isArray(s?.toKeys) ? s.toKeys : [],
+        fromChar: typeof s?.fromChar === "string" ? s.fromChar : "",
+        toChar: typeof s?.toChar === "string" ? s.toChar : "",
+      }));
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    localStorage.setItem(POSITION_OVERALL_SAMPLE_KEY, JSON.stringify(overallPositionSamples));
+  }, [overallPositionSamples]);
+  const computePositionMetrics = (samples: PositionSample[]) => {
+    const transitions = samples.filter((s) => s.correct && s.ms > 0);
 
     const transitionMap = new Map<string, { sumMs: number; sumSqMs: number; count: number; fastCount: number }>();
     const transitionContextMap = new Map<string, {
@@ -487,7 +512,9 @@ export default function TypingPractice() {
       perTransitionByContext,
       perKey,
     };
-  }, [positionSamples]);
+  };
+  const positionMetrics = useMemo(() => computePositionMetrics(positionSamples), [positionSamples]);
+  const overallPositionMetrics = useMemo(() => computePositionMetrics(overallPositionSamples), [overallPositionSamples]);
   const positionPerKeyMap = useMemo(() => {
     const m = new Map<string, { avgMs: number; fastRate: number; count: number }>();
     for (const row of positionMetrics.perKey) {
@@ -534,6 +561,19 @@ export default function TypingPractice() {
       return { stage, count: transitions.length, avgMs, fastRate };
     }).filter((row) => row.count > 0);
   }, [positionSamples]);
+  const overallStagePositionMetrics = useMemo(() => {
+    const stageOrder: Array<PositionStage | "mixed"> = [...POSITION_STAGE_OPTIONS.map((v) => v.key), "mixed"];
+    return stageOrder.map((stage) => {
+      const samples = overallPositionSamples.filter((s) => s.stage === stage);
+      const transitions = samples.filter((s) => s.correct && s.ms > 0);
+      const avgMs = transitions.length > 0
+        ? Math.round(transitions.reduce((sum, s) => sum + s.ms, 0) / transitions.length)
+        : 0;
+      const fastCount = transitions.filter((s) => s.ms <= POSITION_FAST_THRESHOLD_MS).length;
+      const fastRate = transitions.length > 0 ? Math.round((fastCount / transitions.length) * 100) : 0;
+      return { stage, count: transitions.length, avgMs, fastRate };
+    }).filter((row) => row.count > 0);
+  }, [overallPositionSamples]);
   const recommendedWordsForPositionRound = useMemo(() => {
     const dictionaryCandidates = `${savedText1}/${savedText2}/${savedText5}`
       .split(/[\s/]+/)
@@ -1486,8 +1526,20 @@ export default function TypingPractice() {
         if (!isReviewMode && batchStartIndex < randomizedIndices.length && currentBatchChars === "") {
           // 현재 배치의 글자들 계산
           const endIndex = Math.min(batchStartIndex + batchSize, randomizedIndices.length);
-          const batchChars = randomizedIndices
-            .slice(batchStartIndex, endIndex)
+          let batchIndices = randomizedIndices.slice(batchStartIndex, endIndex);
+          // 마지막 배치가 batchSize보다 적으면 랜덤 글자로 채움
+          let randomFill = 0;
+          if (batchIndices.length < batchSize && batchIndices.length > 0) {
+            const shortage = batchSize - batchIndices.length;
+            randomFill = shortage;
+            const allIndices = Array.from({ length: sequentialText.length }, (_, i) => i);
+            for (let i = 0; i < shortage; i++) {
+              const randIdx = allIndices[Math.floor(Math.random() * allIndices.length)];
+              batchIndices.push(randIdx);
+            }
+          }
+          setBatchRandomFillCount(randomFill);
+          const batchChars = batchIndices
             .map(idx => sequentialText[idx])
             .join('');
           setCurrentBatchChars(batchChars);
@@ -1609,6 +1661,7 @@ export default function TypingPractice() {
               setReviewBatches(top5);
               setReviewIndex(0);
               setIsReviewMode(true);
+              setBatchRandomFillCount(0);
               setCurrentBatchChars("");
               updateTypedWord("");
             }, 0);
@@ -2380,6 +2433,8 @@ export default function TypingPractice() {
             </p>
           )}
           {mode !== "random" && !isPositionMode && (
+            <>
+            <span className="text-xs text-gray-500">원문 {inputText.replace(/\s/g, '').length}자</span>
             <textarea
               className="w-full p-2 border rounded"
               rows={25}
@@ -2391,6 +2446,7 @@ export default function TypingPractice() {
               onDrop={handleTextareaDrop}
               onDragOver={(e) => e.preventDefault()}
             />
+            </>
           )}
           </div>
         </div>
@@ -2690,6 +2746,19 @@ export default function TypingPractice() {
                                 </span>
                               );
                             });
+                          }
+
+                          // 매매치라 마지막 배치: 랜덤 채운 글자를 보라색으로 표시
+                          if (isBatchMode && batchRandomFillCount > 0 && text.length > 0) {
+                            const originalCount = text.length - batchRandomFillCount;
+                            return [...text].map((char, idx) => (
+                              <span
+                                key={idx}
+                                className={idx >= originalCount ? 'text-purple-400' : ''}
+                              >
+                                {char}
+                              </span>
+                            ));
                           }
 
                           return text;
@@ -3435,12 +3504,21 @@ export default function TypingPractice() {
                 <div className="mt-2">
                     <div className="border rounded p-4 bg-white space-y-3">
                       <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-semibold">자리 전환 숙련도</h3>
+                        <h3 className="text-lg font-semibold">오늘의 숙련도</h3>
                         <button
                           onClick={() => setPositionSamples([])}
                           className="text-xs px-3 py-1.5 rounded border text-red-600 border-red-300 hover:bg-red-50"
                         >
                           초기화
+                        </button>
+                        <button
+                          onClick={() => {
+                            setOverallPositionSamples((prev) => [...prev, ...positionSamples].slice(-POSITION_OVERALL_SAMPLE_LIMIT));
+                            setPositionSamples([]);
+                          }}
+                          className="text-xs px-3 py-1.5 rounded border text-indigo-600 border-indigo-300 hover:bg-indigo-50"
+                        >
+                          전체에 포함
                         </button>
                       </div>
                       {hoveredPositionKeyId && (
@@ -3460,7 +3538,7 @@ export default function TypingPractice() {
                         {/* 왼쪽: 자리전환숙련도 */}
                         <div className="space-y-3">
                           <div className="border rounded bg-gray-50 p-2">
-                            <div className="text-sm font-semibold mb-1">단계별 자리전환숙련도</div>
+                            <div className="text-sm font-semibold mb-1">단계별 숙련도</div>
                             {stagePositionMetrics.length === 0 ? (
                               <div className="text-xs text-gray-500">데이터 없음</div>
                             ) : (
@@ -3516,7 +3594,70 @@ export default function TypingPractice() {
                             </div>
                           </div>
                         </div>
-                        {/* 가운데: 제외목록 */}
+                        {/* 가운데: 전체 숙련도 */}
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="text-sm font-semibold">전체 숙련도</div>
+                            <span className="text-xs text-gray-500">{overallPositionSamples.length}개</span>
+                            <button
+                              onClick={() => setOverallPositionSamples([])}
+                              className="text-xs px-2 py-0.5 rounded border text-red-600 border-red-300 hover:bg-red-50"
+                            >
+                              초기화
+                            </button>
+                          </div>
+                          <div className="border rounded bg-gray-50 p-2">
+                            <div className="text-sm font-semibold mb-1">단계별 숙련도</div>
+                            {overallStagePositionMetrics.length === 0 ? (
+                              <div className="text-xs text-gray-500">데이터 없음</div>
+                            ) : (
+                              <div className="space-y-1">
+                                {overallStagePositionMetrics.map((row) => (
+                                  <div key={`overall-stage-position-metric-${row.stage}`} className="text-xs flex items-center justify-between gap-2">
+                                    <span className="font-medium">
+                                      {row.stage === "mixed"
+                                        ? "복합선택"
+                                        : (POSITION_STAGE_OPTIONS.find((v) => v.key === row.stage)?.label ?? row.stage)}
+                                    </span>
+                                    <span className="text-gray-600">{row.avgMs}ms | 빠른 {row.fastRate}% | {row.count}회</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold mb-1">동시 조합별 약점</div>
+                            <div className="max-h-80 overflow-y-auto border rounded">
+                              {overallPositionMetrics.perTransitionByContext.length === 0 ? (
+                                <div className="p-2 text-xs text-gray-400">데이터 없음</div>
+                              ) : (
+                                overallPositionMetrics.perTransitionByContext.slice(0, 80).map((row) => (
+                                  <div
+                                    key={row.id}
+                                    className="px-2 py-1 text-xs border-b last:border-b-0"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-medium flex items-center gap-1">
+                                        <span className={`px-1.5 py-0.5 rounded border ${getPositionGroupColorClass(row.group)}`}>{row.fromUnit}</span>
+                                        <span className="text-gray-400">→</span>
+                                        <span className={`px-1.5 py-0.5 rounded border ${getPositionGroupColorClass(row.group)}`}>{row.toUnit}</span>
+                                      </span>
+                                      <span className="text-gray-600 flex items-center gap-1">
+                                        {row.stability === "unstable" && <span className="px-1 py-0.5 text-[10px] rounded bg-amber-100 text-amber-700 border border-amber-300">불안정</span>}
+                                        {row.stability === "stable_slow" && <span className="px-1 py-0.5 text-[10px] rounded bg-blue-100 text-blue-700 border border-blue-300">느림</span>}
+                                        평균 {row.avgMs}ms ±{row.stdDev} | 빠른 {row.fastRate}% | {row.count}회
+                                      </span>
+                                    </div>
+                                    <div className="mt-0.5 text-[11px] text-gray-500">
+                                      글자: {row.fromChar || "-"} → {row.toChar || "-"}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        {/* 오른쪽: 제외목록 */}
                         <div>
                           <div className="border rounded bg-gray-50 p-2">
                             <div className="text-sm font-semibold mb-1">제외목록</div>
@@ -3550,8 +3691,6 @@ export default function TypingPractice() {
                             )}
                           </div>
                         </div>
-                        {/* 오른쪽: 빈 칸 (예비) */}
-                        <div />
                       </div>
                     </div>
                 </div>
