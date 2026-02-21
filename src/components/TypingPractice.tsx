@@ -2,7 +2,7 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState, useMemo } from "react";
 import { useTypingStore, type PositionStage, POSITION_BASE_QUESTION_COUNT, POSITION_RECOMMENDED_MAX_COUNT } from "../store/useTypingStore";
 import { savedText1, savedText2, savedText5 } from "../constants";
-import { GEMINI_MODEL_NAMES, SENTENCE_STYLES } from "../constants/uiConstants";
+import { GEMINI_MODEL_NAMES, GEMINI_MODEL_OPTIONS, SENTENCE_STYLES } from "../constants/uiConstants";
 import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../utils/scoringAnalysis";
 import { logResult, logSession } from "../utils/sheetLogger";
 import { generateSentencesStream } from "../utils/generateSentencesAI";
@@ -708,11 +708,13 @@ export default function TypingPractice() {
   const {
     geminiApiKey, setGeminiApiKey, isGenerating, setIsGenerating,
     generatedCount, setGeneratedCount, aiModelName, setAiModelName,
-    sentenceStyle, setSentenceStyle, aiModelNameRef,
+    sentenceStyle, setSentenceStyle, selectedModel, setSelectedModel, aiModelNameRef,
     generateError, setGenerateError, generateAbortRef,
     apiCallCount, apiCallModels, incrementApiCallCount,
     setGenerateErrorWithRetry, getErrorMessage,
   } = useAIGeneration();
+  const [canGenerateMore, setCanGenerateMore] = useState(false);
+  const sentenceTargetCountRef = useRef(0);
   // 문장모드 상태 보존 (모드 전환 시 API 호출 절약)
   const savedSentenceStateRef = useRef<{
     sentences: string[];
@@ -1296,6 +1298,81 @@ export default function TypingPractice() {
   };
 
 
+  const generateMoreSentences = async (
+    words: string[],
+    targetCount: number,
+    alreadyGenerated: number,
+    isAppending: boolean,
+    batchSize = 2500,
+  ) => {
+    setGenerateError(null);
+    setIsGenerating(true);
+    setCanGenerateMore(false);
+    sentenceTargetCountRef.current = targetCount;
+    if (!isAppending) {
+      setGeneratedCount(0);
+    }
+    const abortController = new AbortController();
+    generateAbortRef.current = abortController;
+    let totalGenerated = alreadyGenerated;
+    let started = isAppending;
+
+    const remaining = targetCount - totalGenerated;
+    if (remaining <= 0) {
+      setIsGenerating(false);
+      generateAbortRef.current = null;
+      setTotalCount(totalGenerated);
+      return;
+    }
+
+    const batchCount = Math.min(batchSize, remaining);
+
+    try {
+      await generateSentencesStream(
+        words,
+        batchCount,
+        geminiApiKey,
+        sentenceStyle,
+        (sentence, _index) => {
+          totalGenerated++;
+          setGeneratedCount(totalGenerated);
+          if (!started) {
+            started = true;
+            setSentences([sentence]);
+            startPractice(words);
+          } else {
+            addSentence(sentence);
+          }
+        },
+        async (_batchTotal) => {
+          setIsGenerating(false);
+          generateAbortRef.current = null;
+          setTotalCount(totalGenerated);
+          if (totalGenerated < targetCount) {
+            setCanGenerateMore(true);
+          }
+        },
+        (error) => {
+          setGenerateErrorWithRetry(error);
+          setIsDrawerOpen(true);
+          setIsGenerating(false);
+          generateAbortRef.current = null;
+          if (totalGenerated > 0) setTotalCount(totalGenerated);
+        },
+        (model) => { aiModelNameRef.current = model; setAiModelName(model); incrementApiCallCount(); },
+        abortController.signal,
+        selectedModel,
+      );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setGenerateErrorWithRetry(err instanceof Error ? err.message : "문장 생성에 실패했습니다.");
+      setIsDrawerOpen(true);
+      setIsGenerating(false);
+      generateAbortRef.current = null;
+      if (totalGenerated > 0) setTotalCount(totalGenerated);
+    }
+  };
+
   const handleStartOrStopPractice = async () => {
     // 생성 중에 클릭하면 생성만 중지하고 기존 문장으로 계속 연습
     if (isGenerating) {
@@ -1383,68 +1460,8 @@ export default function TypingPractice() {
             const abortController = new AbortController();
             generateAbortRef.current = abortController;
             const targetCount = words.length;
-            const BATCH_SIZE = 2500; // 번호추적 프롬프트로 1회 호출에 최대 2500개 안정 생성
-            let totalGenerated = 0;
-            let started = false;
-            const generateBatch = async (): Promise<void> => {
-              const remaining = targetCount - totalGenerated;
-              if (remaining <= 0) {
-                setIsGenerating(false);
-                generateAbortRef.current = null;
-                setTotalCount(totalGenerated);
-                return;
-              }
-
-              const batchCount = Math.min(BATCH_SIZE, remaining);
-
-              await generateSentencesStream(
-                words,
-                batchCount,
-                geminiApiKey,
-                sentenceStyle,
-                (sentence, _index) => {
-                  totalGenerated++;
-                  setGeneratedCount(totalGenerated);
-                  if (!started) {
-                    started = true;
-                    setSentences([sentence]);
-                    startPractice(words);
-                  } else {
-                    addSentence(sentence);
-                  }
-                },
-                async (batchTotal) => {
-                  if (totalGenerated < targetCount && batchTotal > 0) {
-                    // 아직 남았으면 다음 배치 호출 (출력 토큰 한도로 인한 분할)
-                    await generateBatch();
-                  } else {
-                    setIsGenerating(false);
-                    generateAbortRef.current = null;
-                    setTotalCount(totalGenerated);
-                  }
-                },
-                (error) => {
-                  setGenerateErrorWithRetry(error);
-                  setIsDrawerOpen(true);
-                  setIsGenerating(false);
-                  generateAbortRef.current = null;
-                  if (totalGenerated > 0) setTotalCount(totalGenerated);
-                },
-                (model) => { aiModelNameRef.current = model; setAiModelName(model); incrementApiCallCount(); },
-                abortController.signal,
-              );
-            };
-
-            try {
-              await generateBatch();
-            } catch (err) {
-              if (err instanceof DOMException && err.name === "AbortError") return;
-              setGenerateErrorWithRetry(err instanceof Error ? err.message : "문장 생성에 실패했습니다.");
-              setIsDrawerOpen(true);
-              setIsGenerating(false);
-              generateAbortRef.current = null;
-              if (totalGenerated > 0) setTotalCount(totalGenerated);
-            }
+            const BATCH_SIZE = 2500;
+            generateMoreSentences(words, targetCount, 0, false, BATCH_SIZE);
           }
         } else {
           // 단어 모드
@@ -2494,26 +2511,56 @@ export default function TypingPractice() {
                 )}
               </div>
               {mode === "sentences" && (isGenerating || (isPracticing && generatedCount > 0)) && (
-                <div className="text-xs text-gray-500 mt-1">
-                  ({generatedCount}/{inputText.trim().split("/").filter(Boolean).length}){aiModelName ? ` [${aiModelName}]` : ""}
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs text-gray-500">
+                    ({generatedCount}/{inputText.trim().split("/").filter(Boolean).length}){aiModelName ? ` [${aiModelName}]` : ""}
+                  </span>
+                  {canGenerateMore && !isGenerating && (
+                    <button
+                      className="text-xs px-2 py-0.5 rounded border border-blue-400 text-blue-600 hover:bg-blue-50 font-medium"
+                      onClick={() => {
+                        const words = inputText.trim().split("/").filter(Boolean);
+                        generateMoreSentences(words, sentenceTargetCountRef.current, generatedCount, true);
+                      }}
+                    >
+                      추가 생성 ({Math.min(2500, sentenceTargetCountRef.current - generatedCount)}개)
+                    </button>
+                  )}
                 </div>
               )}
               {mode === "sentences" && !isPracticing && !isGenerating && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {SENTENCE_STYLES.map((style) => (
-                    <button
-                      key={style}
-                      className={`px-2.5 py-1 text-xs rounded-full border transition ${
-                        sentenceStyle === style
-                          ? "bg-blue-500 text-white border-blue-500"
-                          : "bg-white text-gray-600 border-gray-300 hover:border-blue-400 hover:text-blue-500"
-                      }`}
-                      onClick={() => setSentenceStyle(style)}
-                    >
-                      {style}
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {SENTENCE_STYLES.map((style) => (
+                      <button
+                        key={style}
+                        className={`px-2.5 py-1 text-xs rounded-full border transition ${
+                          sentenceStyle === style
+                            ? "bg-blue-500 text-white border-blue-500"
+                            : "bg-white text-gray-600 border-gray-300 hover:border-blue-400 hover:text-blue-500"
+                        }`}
+                        onClick={() => setSentenceStyle(style)}
+                      >
+                        {style}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {GEMINI_MODEL_OPTIONS.map((model) => (
+                      <button
+                        key={model.id}
+                        className={`px-2.5 py-1 text-xs rounded-full border transition ${
+                          selectedModel === model.id
+                            ? "bg-emerald-500 text-white border-emerald-500"
+                            : "bg-white text-gray-600 border-gray-300 hover:border-emerald-400 hover:text-emerald-500"
+                        }`}
+                        onClick={() => setSelectedModel(model.id)}
+                      >
+                        {model.label} ({model.estimatedSentences})
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -2865,7 +2912,9 @@ export default function TypingPractice() {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         // 숫자 입력 시 슬롯 이동 (보고치라/매매치라 모두 지원)
-                        const slotNum = parseInt(practiceText.trim());
+                        const trimmed = practiceText.trimEnd();
+                        const endsWithNum = trimmed.match(/(\d+)$/);
+                        const slotNum = endsWithNum ? parseInt(endsWithNum[1]) : NaN;
                         if (slotNum === 99) {
                           // 99 입력 시 랜덤 슬롯 (현재 슬롯 제외, 즐겨찾기 우선)
                           const slotsWithContent: number[] = [];
@@ -3386,6 +3435,18 @@ export default function TypingPractice() {
                   })}
                 </div>
               )}
+              {mode === "sentences" && (
+                <div className="flex flex-col items-start gap-1 mb-2">
+                  {[-2, -1].map(offset => {
+                    const idx = currentSentenceIndex + offset;
+                    return idx >= 0 && sentences[idx] ? (
+                      <span key={offset} className="text-gray-400" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px` }}>
+                        {sentences[idx]}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              )}
               {isReviewActive && mode === "words" && (
                 <div className="mb-2 text-sm font-bold text-orange-600">
                   {reviewType === "failed" ? "2차복습" : "1차복습"} {currentReviewIndex + 1}/{reviewWords.length}
@@ -3424,6 +3485,18 @@ export default function TypingPractice() {
                     return idx < shuffledWords.length && shuffledWords[idx] ? (
                       <span key={offset} className="text-gray-400" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px` }}>
                         {shuffledWords[idx]}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              )}
+              {mode === "sentences" && (
+                <div className="flex flex-col items-start gap-1 mt-2">
+                  {[1, 2].map(offset => {
+                    const idx = currentSentenceIndex + offset;
+                    return idx < sentences.length && sentences[idx] ? (
+                      <span key={offset} className="text-gray-400" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px` }}>
+                        {sentences[idx]}
                       </span>
                     ) : null;
                   })}
