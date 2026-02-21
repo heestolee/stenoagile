@@ -9,7 +9,7 @@ export const GEMINI_MODEL_NAMES = [
 ] as const;
 
 export const GEMINI_MODEL_OPTIONS = [
-  { id: "auto", label: "자동 선택", estimatedSentences: "자동 폴백" },
+  { id: "auto", label: "자동 선택", estimatedSentences: "성능순" },
   { id: "gemini-3-flash-preview", label: "3 Flash Preview", estimatedSentences: "~100개" },
   { id: "gemini-2.5-flash", label: "2.5 Flash", estimatedSentences: "~600-1300개" },
   { id: "gemini-2.5-flash-lite", label: "2.5 Flash Lite", estimatedSentences: "~600-1300개" },
