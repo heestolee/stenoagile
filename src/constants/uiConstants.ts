@@ -8,6 +8,15 @@ export const GEMINI_MODEL_NAMES = [
   "gemini-2.0-flash-lite",
 ] as const;
 
+export const GEMINI_MODEL_OPTIONS = [
+  { id: "auto", label: "자동 선택", estimatedSentences: "성능순" },
+  { id: "gemini-3-flash-preview", label: "3 Flash Preview", estimatedSentences: "~100개" },
+  { id: "gemini-2.5-flash", label: "2.5 Flash", estimatedSentences: "~600-1300개" },
+  { id: "gemini-2.5-flash-lite", label: "2.5 Flash Lite", estimatedSentences: "~600-1300개" },
+  { id: "gemini-2.0-flash", label: "2.0 Flash", estimatedSentences: "~80-160개" },
+  { id: "gemini-2.0-flash-lite", label: "2.0 Flash Lite", estimatedSentences: "~80-160개" },
+] as const;
+
 export const SENTENCE_STYLES = [
   "랜덤 대화체",
   "뉴스/일상 대화체",

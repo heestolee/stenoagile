@@ -2,6 +2,11 @@ import { useState, useRef } from "react";
 
 export function useAIGeneration() {
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
+  const [selectedModel, setSelectedModelState] = useState(() => localStorage.getItem("gemini_selected_model") || "auto");
+  const setSelectedModel = (model: string) => {
+    setSelectedModelState(model);
+    localStorage.setItem("gemini_selected_model", model);
+  };
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
   const [aiModelName, setAiModelName] = useState("");
@@ -126,6 +131,8 @@ export function useAIGeneration() {
     apiCallCount,
     apiCallModels,
     incrementApiCallCount,
+    selectedModel,
+    setSelectedModel,
     setGenerateErrorWithRetry,
     getErrorMessage,
   };

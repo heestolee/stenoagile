@@ -8,11 +8,12 @@ export async function generateSentencesStream(
   onError: (error: string) => void,
   onModel?: (model: string) => void,
   signal?: AbortSignal,
+  preferredModel?: string,
 ): Promise<void> {
   const response = await fetch("/api/generate-sentences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ words, count, apiKey, style }),
+    body: JSON.stringify({ words, count, apiKey, style, preferredModel }),
     signal,
   });
 

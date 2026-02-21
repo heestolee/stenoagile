@@ -170,11 +170,12 @@ export function claudePlugin(): Plugin {
           const body = await readBody(req);
 
           try {
-            const { words, count, apiKey, style } = JSON.parse(body) as {
+            const { words, count, apiKey, style, preferredModel } = JSON.parse(body) as {
               words: string[];
               count: number;
               apiKey: string;
               style?: string;
+              preferredModel?: string;
             };
 
             if (!apiKey) {
@@ -209,7 +210,14 @@ JSON 배열로만 응답하세요.`;
             let succeeded = false;
             let headersSent = false;
 
-            for (let mi = lastSuccessModelIndex; mi < GEMINI_MODELS.length; mi++) {
+            // preferredModel이 지정되면 해당 모델부터 시작
+            let startIndex = lastSuccessModelIndex;
+            if (preferredModel && preferredModel !== "auto") {
+              const preferredIdx = GEMINI_MODELS.findIndex(m => m.id === preferredModel);
+              if (preferredIdx !== -1) startIndex = preferredIdx;
+            }
+
+            for (let mi = startIndex; mi < GEMINI_MODELS.length; mi++) {
               const model = GEMINI_MODELS[mi];
               const generationConfig: Record<string, unknown> = {
                 maxOutputTokens: model.maxOutput,
