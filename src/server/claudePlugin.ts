@@ -185,19 +185,18 @@ export function claudePlugin(): Plugin {
               return;
             }
 
-            if (!words || words.length === 0) {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "단어 목록이 필요합니다." }));
-              return;
-            }
+            const isRandomMode = !words || words.length === 0;
 
             const styleInstruction = style === "랜덤 대화체"
               ? "각 문장마다 뉴스/일상, 비즈니스 공문, 학술/논문, 소설/문학, 법률/계약, 의료/건강, IT/기술, 스포츠 중계, 요리/레시피, 여행/관광 등 다양한 대화체를 섞어서. 문장 뒤에 대화체 종류를 표시하지 마세요"
               : `자연스러운 ${style || "뉴스/일상 대화체"}로`;
 
+            const wordInstruction = isRandomMode
+              ? "자유로운 주제로 다양한 단어를 사용하여"
+              : `단어 목록: ${words.join(", ")}\n이 단어들을 포함하여`;
+
             const prompt = `정확히 ${count}개의 한국어 문장을 생성하세요.
-단어 목록: ${words.join(", ")}
+${wordInstruction}
 각 문장 20~50자, ${styleInstruction}.
 
 중요: 각 문장 앞에 번호를 붙여서 진행 상황을 추적하세요.
