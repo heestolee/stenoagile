@@ -11,6 +11,7 @@ export function useAIGeneration() {
   const [generatedCount, setGeneratedCount] = useState(0);
   const [aiModelName, setAiModelName] = useState("");
   const [sentenceStyle, setSentenceStyle] = useState("랜덤 대화체");
+  const [useRandomSentences, setUseRandomSentences] = useState(false);
   const aiModelNameRef = useRef("");
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [retryCountdown, setRetryCountdown] = useState(0);
@@ -123,6 +124,8 @@ export function useAIGeneration() {
     setAiModelName,
     sentenceStyle,
     setSentenceStyle,
+    useRandomSentences,
+    setUseRandomSentences,
     aiModelNameRef,
     generateError,
     setGenerateError,

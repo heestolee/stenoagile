@@ -501,10 +501,8 @@ export const useTypingStore = create<TypingState>()(
       stopPractice: () => {
         set({
           shuffledWords: [],
-          sentences: [],
           randomLetters: [],
           currentWordIndex: 0,
-          currentSentenceIndex: 0,
           currentLetterIndex: 0,
           typedWord: "",
           correctCount: 0,
