@@ -9,6 +9,7 @@ export function useSlotManager(inputText: string) {
   const [todayCompletedRounds, setTodayCompletedRounds] = useState(0);
   const [slotCompletedRoundsNormal, setSlotCompletedRoundsNormal] = useState<Record<number, number>>({});
   const [slotCompletedRoundsBatch, setSlotCompletedRoundsBatch] = useState<Record<number, number>>({});
+  const [modeCompletedRounds, setModeCompletedRounds] = useState<Record<string, number>>({});
   const [practiceSlot, setPracticeSlot] = useState<number | null>(null);
   const [pendingIncrementSlot, setPendingIncrementSlot] = useState<number | null>(null);
 
@@ -54,21 +55,31 @@ export function useSlotManager(inputText: string) {
         setTodayCompletedRounds(parsed.count || 0);
         setSlotCompletedRoundsNormal(parsed.normalSlotCounts || parsed.slotCounts || {});
         setSlotCompletedRoundsBatch(parsed.batchSlotCounts || {});
+        setModeCompletedRounds(parsed.modeCounts || {});
       } else {
-        localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, normalSlotCounts: {}, batchSlotCounts: {} }));
+        localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, normalSlotCounts: {}, batchSlotCounts: {}, modeCounts: {} }));
         setTodayCompletedRounds(0);
         setSlotCompletedRoundsNormal({});
         setSlotCompletedRoundsBatch({});
+        setModeCompletedRounds({});
       }
     } else {
-      localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, normalSlotCounts: {}, batchSlotCounts: {} }));
+      localStorage.setItem('completedRounds', JSON.stringify({ date: today, count: 0, normalSlotCounts: {}, batchSlotCounts: {}, modeCounts: {} }));
     }
   }, []);
 
   // 라운드 완료 카운트 증가
-  const incrementCompletedRounds = useCallback((slot: number | null, isBatch: boolean) => {
-    setTodayCompletedRounds(prev => prev + 1);
+  const incrementCompletedRounds = useCallback((slot: number | null, modeKey: string, amount = 1) => {
+    setTodayCompletedRounds(prev => prev + amount);
 
+    // 모드별 카운트 증가
+    setModeCompletedRounds(prev => ({
+      ...prev,
+      [modeKey]: (prev[modeKey] || 0) + amount,
+    }));
+
+    // 슬롯별 카운트 (기존 호환성 유지)
+    const isBatch = modeKey === "batch";
     if (slot !== null) {
       if (isBatch) {
         setSlotCompletedRoundsBatch(prevSlots => {
@@ -94,10 +105,11 @@ export function useSlotManager(inputText: string) {
         date: today,
         count: todayCompletedRounds,
         normalSlotCounts: slotCompletedRoundsNormal,
-        batchSlotCounts: slotCompletedRoundsBatch
+        batchSlotCounts: slotCompletedRoundsBatch,
+        modeCounts: modeCompletedRounds
       }));
     }
-  }, [todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch]);
+  }, [todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch, modeCompletedRounds]);
 
   const handleRenameSlot = (slot: number) => {
     const currentName = slotNames[slot] || `${slot}`;
@@ -140,6 +152,7 @@ export function useSlotManager(inputText: string) {
     todayCompletedRounds,
     slotCompletedRoundsNormal,
     slotCompletedRoundsBatch,
+    modeCompletedRounds,
     practiceSlot,
     setPracticeSlot,
     pendingIncrementSlot,
