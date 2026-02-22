@@ -213,6 +213,7 @@ export default function TypingPractice() {
   } = useTypingStore();
   const { user, signOut } = useAuth();
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showModeStats, setShowModeStats] = useState(false);
   const isPositionMode = mode === "position";
   const isWordLikeMode = mode === "words" || mode === "position";
 
@@ -224,7 +225,7 @@ export default function TypingPractice() {
   const sequentialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {
     selectedSlot, setSelectedSlot, slotNames, favoriteSlots,
-    todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch,
+    todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch, modeCompletedRounds,
     practiceSlot, setPracticeSlot, pendingIncrementSlot, setPendingIncrementSlot,
     incrementCompletedRounds, handleRenameSlot, toggleFavoriteSlot, handleSaveToSlot,
   } = useSlotManager(inputText);
@@ -237,6 +238,7 @@ export default function TypingPractice() {
   const [, setRoundStartTime] = useState<number | null>(null); // 라운드 시작 시간
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isRoundComplete, setIsRoundComplete] = useState(false); // 라운드 완료 상태 (결과 확인 대기)
+  const [isSentenceReview, setIsSentenceReview] = useState(false); // 문장모드 복습 중 여부
   const [accumulatedKeystrokes, setAccumulatedKeystrokes] = useState(0); // 누적 타수
   const [accumulatedElapsedMs, setAccumulatedElapsedMs] = useState(0); // 누적 경과 시간
   const [displayElapsedTime, setDisplayElapsedTime] = useState(0); // 실시간 표시용 경과 시간
@@ -708,7 +710,8 @@ export default function TypingPractice() {
   const {
     geminiApiKey, setGeminiApiKey, isGenerating, setIsGenerating,
     generatedCount, setGeneratedCount, aiModelName, setAiModelName,
-    sentenceStyle, setSentenceStyle, selectedModel, setSelectedModel, aiModelNameRef,
+    sentenceStyle, setSentenceStyle, useRandomSentences, setUseRandomSentences,
+    selectedModel, setSelectedModel, aiModelNameRef,
     generateError, setGenerateError, generateAbortRef,
     apiCallCount, apiCallModels, incrementApiCallCount,
     setGenerateErrorWithRetry, getErrorMessage,
@@ -790,9 +793,13 @@ export default function TypingPractice() {
       stopPractice();
       resetReview();
       setIsDrawerOpen(true);
-      incrementCompletedRounds(practiceSlot, false);
+      incrementCompletedRounds(practiceSlot, mode, totalCount);
+      // 복습 완료 시 복습 상태 해제
+      if (isSentenceReview) {
+        setIsSentenceReview(false);
+      }
     }
-  }, [progressCount, totalCount, mode, isPracticing, isReviewActive]);
+  }, [progressCount, totalCount, mode, isPracticing, isReviewActive, isSentenceReview]);
 
   // 자리모드 자동 반복: 40개 완료 후 즉시 0으로 리셋되므로 완료 횟수를 별도로 반영
   useEffect(() => {
@@ -804,7 +811,7 @@ export default function TypingPractice() {
     const prev = prevPositionProgressRef.current;
     const justCompletedCycle = prev === totalCount - 1 && progressCount === 0;
     if (justCompletedCycle) {
-      incrementCompletedRounds(practiceSlot, false);
+      incrementCompletedRounds(practiceSlot, "position");
       setPositionCycleToast("사이클 완료! 다음 라운드 시작");
       setTimeout(() => setPositionCycleToast(null), 2000);
     }
@@ -901,7 +908,7 @@ export default function TypingPractice() {
   // completedSlot: 방금 완료한 슬롯 (카운트다운 끝난 후 increment)
   // wasBatchMode: 완료한 라운드가 매매치라 모드였는지
   // nextSlot: 다음에 시작할 슬롯 (지정하지 않으면 selectedSlot 사용)
-  const startNextRound = (completedSlot?: number | null, wasBatchMode?: boolean, nextSlot?: number) => {
+  const startNextRound = (completedSlot?: number | null, completedModeKey?: string, nextSlot?: number) => {
     // 드로어 닫기
     setIsDrawerOpen(false);
     // 다음 슬롯 설정 (nextSlot이 있으면 사용, 없으면 selectedSlot)
@@ -926,7 +933,7 @@ export default function TypingPractice() {
     startCountdown(() => {
       // 카운트다운 끝난 후 완료 횟수 증가
       if (completedSlot !== undefined && completedSlot !== null) {
-        incrementCompletedRounds(completedSlot, wasBatchMode ?? false);
+        incrementCompletedRounds(completedSlot, completedModeKey ?? "sequential");
       }
       setPendingIncrementSlot(null); // 표시용 상태 초기화
       setRoundStartTime(Date.now());
@@ -1136,10 +1143,10 @@ export default function TypingPractice() {
                   updateInputText(savedText);
                 }
                 setSelectedSlot(slotNum);
-                startNextRound(practiceSlot, true);
+                startNextRound(practiceSlot, "batch");
                 return;
               }
-              startNextRound(practiceSlot, true);
+              startNextRound(practiceSlot, "batch");
             } else {
               resumeRound();
             }
@@ -1148,7 +1155,7 @@ export default function TypingPractice() {
           // 보고치라 모드
           if (mode === "sequential") {
             if (isFullyComplete) {
-              startNextRound(practiceSlot, false);
+              startNextRound(practiceSlot, "sequential");
             } else {
               resumeRound();
             }
@@ -1157,7 +1164,7 @@ export default function TypingPractice() {
           // 긴글 모드
           if (mode === "longtext") {
             if (isFullyComplete) {
-              startNextRound(practiceSlot, false);
+              startNextRound(practiceSlot, "longtext");
             } else {
               resumeRound();
             }
@@ -1166,7 +1173,7 @@ export default function TypingPractice() {
           // 랜덤 모드
           if (mode === "random") {
             if (isFullyComplete) {
-              startNextRound(practiceSlot, false);
+              startNextRound(practiceSlot, "random");
             } else {
               resumeRound();
             }
@@ -1348,7 +1355,7 @@ export default function TypingPractice() {
           setIsGenerating(false);
           generateAbortRef.current = null;
           setTotalCount(totalGenerated);
-          if (totalGenerated < targetCount) {
+          if (totalGenerated < targetCount || useRandomSentences) {
             setCanGenerateMore(true);
           }
         },
@@ -1453,15 +1460,18 @@ export default function TypingPractice() {
               return;
             }
             // 문장 모드: AI 문장 스트리밍 생성 (배치 분할)
+            setIsSentenceReview(false);
+            setSentences([]);
             setGenerateError(null);
             setIsGenerating(true);
             setGeneratedCount(0);
             setAiModelName("");
             const abortController = new AbortController();
             generateAbortRef.current = abortController;
-            const targetCount = words.length;
+            const sentenceWords = useRandomSentences ? [] : words;
+            const targetCount = useRandomSentences ? 2500 : words.length;
             const BATCH_SIZE = 2500;
-            generateMoreSentences(words, targetCount, 0, false, BATCH_SIZE);
+            generateMoreSentences(sentenceWords, targetCount, 0, false, BATCH_SIZE);
           }
         } else {
           // 단어 모드
@@ -2516,21 +2526,58 @@ export default function TypingPractice() {
                     ({generatedCount}/{inputText.trim().split("/").filter(Boolean).length}){aiModelName ? ` [${aiModelName}]` : ""}
                   </span>
                   {canGenerateMore && !isGenerating && (
-                    <button
-                      className="text-xs px-2 py-0.5 rounded border border-blue-400 text-blue-600 hover:bg-blue-50 font-medium"
-                      onClick={() => {
-                        const words = inputText.trim().split("/").filter(Boolean);
-                        generateMoreSentences(words, sentenceTargetCountRef.current, generatedCount, true);
-                      }}
-                    >
-                      추가 생성 ({Math.min(2500, sentenceTargetCountRef.current - generatedCount)}개)
-                    </button>
+                    <div className="flex items-center gap-1 border border-blue-400 rounded-full px-1 py-0.5 bg-blue-50 shadow-sm">
+                      {GEMINI_MODEL_OPTIONS.map((model) => (
+                        <button
+                          key={model.id}
+                          className={`text-xs px-1.5 py-0.5 rounded-full transition ${
+                            selectedModel === model.id
+                              ? "bg-emerald-500 text-white"
+                              : "text-gray-500 hover:text-emerald-500"
+                          }`}
+                          onClick={() => setSelectedModel(model.id)}
+                        >
+                          {model.label}
+                        </button>
+                      ))}
+                      <button
+                        className="text-xs px-2 py-0.5 rounded-full bg-blue-500 text-white hover:bg-blue-600 font-medium ml-0.5"
+                        onClick={() => {
+                          const words = useRandomSentences ? [] : inputText.trim().split("/").filter(Boolean);
+                          generateMoreSentences(words, sentenceTargetCountRef.current, generatedCount, true);
+                        }}
+                      >
+                        추가생성
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
               {mode === "sentences" && !isPracticing && !isGenerating && (
                 <>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
+                  <div className="flex gap-1.5 mt-2">
+                    <button
+                      className={`px-2.5 py-1 text-xs rounded-full border transition ${
+                        !useRandomSentences
+                          ? "bg-orange-500 text-white border-orange-500"
+                          : "bg-white text-gray-600 border-gray-300 hover:border-orange-400 hover:text-orange-500"
+                      }`}
+                      onClick={() => setUseRandomSentences(false)}
+                    >
+                      원문 단어
+                    </button>
+                    <button
+                      className={`px-2.5 py-1 text-xs rounded-full border transition ${
+                        useRandomSentences
+                          ? "bg-orange-500 text-white border-orange-500"
+                          : "bg-white text-gray-600 border-gray-300 hover:border-orange-400 hover:text-orange-500"
+                      }`}
+                      onClick={() => setUseRandomSentences(true)}
+                    >
+                      랜덤 문장
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {SENTENCE_STYLES.map((style) => (
                       <button
                         key={style}
@@ -2568,7 +2615,7 @@ export default function TypingPractice() {
           {/* 단어/문장 모드 라운드 완료 결과 */}
           {roundCompleteResult && !isPracticing && (mode === "words" || mode === "sentences") && (
             <div className="p-4 border-2 border-green-500 rounded bg-green-50">
-              <p className="text-lg font-bold text-green-700 mb-2">라운드 완료!</p>
+              <p className="text-lg font-bold text-green-700 mb-2">{isSentenceReview ? "복습 완료!" : "라운드 완료!"}</p>
               <div className="flex gap-4 text-sm">
                 <span className="text-blue-600">정답: {roundCompleteResult.correct}</span>
                 <span className="text-rose-600">오답: {roundCompleteResult.incorrect}</span>
@@ -2577,6 +2624,24 @@ export default function TypingPractice() {
                   <span className="text-gray-600">평균 타수 {roundCompleteResult.avgKpm} / 자수 {roundCompleteResult.avgCpm}</span>
                 )}
               </div>
+              {mode === "sentences" && sentences.length > 0 && !isSentenceReview && (
+                <button
+                  className="mt-2 px-4 py-1.5 rounded font-semibold bg-purple-500 text-white hover:bg-purple-600 transition text-sm"
+                  onClick={() => {
+                    const parsedWords = inputText.trim().split("/").filter(Boolean);
+                    setIsSentenceReview(true);
+                    setRoundCompleteResult(null);
+                    resetBatchAndReviewState();
+                    setPracticeSlot(selectedSlot);
+                    setIsDrawerOpen(false);
+                    startPractice(parsedWords);
+                    setTotalCount(sentences.length);
+                    setTimeout(() => wordInputRef.current?.focus(), 50);
+                  }}
+                >
+                  복습하기
+                </button>
+              )}
             </div>
           )}
 
@@ -2932,7 +2997,7 @@ export default function TypingPractice() {
                             if (savedText) {
                               updateInputText(savedText);
                             }
-                            startNextRound(practiceSlot, isBatchMode, randomSlot);
+                            startNextRound(practiceSlot, isBatchMode ? "batch" : mode, randomSlot);
                             return;
                           }
                         }
@@ -2941,14 +3006,14 @@ export default function TypingPractice() {
                           if (savedText) {
                             updateInputText(savedText);
                           }
-                          startNextRound(practiceSlot, isBatchMode, slotNum);
+                          startNextRound(practiceSlot, isBatchMode ? "batch" : mode, slotNum);
                           return;
                         }
                         // 매매치라 모드: 복습 5/5 완료 전에는 무조건 재개
                         if (isBatchMode && !isBatchReviewDone) {
                           resumeRound();
                         } else if (isFullyComplete) {
-                          startNextRound(practiceSlot, isBatchMode); // 카운트다운 후 완료 횟수 증가
+                          startNextRound(practiceSlot, isBatchMode ? "batch" : mode); // 카운트다운 후 완료 횟수 증가
                         } else {
                           resumeRound();
                         }
@@ -3537,6 +3602,9 @@ export default function TypingPractice() {
                   {isReviewActive && mode === "words" && (
                     <> | <span className={`font-bold ${reviewType === "failed" ? "text-amber-700" : "text-orange-600"}`}>{reviewType === "failed" ? "2차복습" : "1차복습"}: {currentReviewIndex + 1}/{reviewWords.length}</span></>
                   )}
+                  {isSentenceReview && mode === "sentences" && isPracticing && (
+                    <> | <span className="font-bold text-purple-600">복습 중</span></>
+                  )}
                 </p>
                 {isPositionMode && isPracticing && activeSingleStage && (
                   <span className="text-[11px] text-gray-400">스페이스: 현재 글자 제외/해제</span>
@@ -3775,6 +3843,35 @@ export default function TypingPractice() {
       {showLoginModal && (
         <LoginPage onClose={() => setShowLoginModal(false)} />
       )}
+      {/* 우하단 모드별 완료 현황 토글 */}
+      <div className="fixed bottom-4 right-4 z-50">
+        {showModeStats && (
+          <div className="mb-2 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-sm min-w-[150px]">
+            <div className="font-semibold text-gray-700 mb-2 border-b pb-1">오늘의 완료 현황</div>
+            {([
+              ["sequential", "보고치라"],
+              ["batch", "매매치라"],
+              ["longtext", "긴글"],
+              ["random", "랜덤"],
+              ["words", "단어"],
+              ["sentences", "문장"],
+              ["position", "자리"],
+            ] as const).map(([key, label]) => (
+              <div key={key} className="flex justify-between py-0.5">
+                <span className="text-gray-600">{label}</span>
+                <span className="font-semibold text-gray-800">{modeCompletedRounds[key] || 0}{key === "words" ? "단어" : key === "sentences" ? "문장" : "회"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={() => setShowModeStats(prev => !prev)}
+          className="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg text-lg"
+          title="모드별 완료 현황"
+        >
+          {todayCompletedRounds}
+        </button>
+      </div>
     </div>
   );
 }
