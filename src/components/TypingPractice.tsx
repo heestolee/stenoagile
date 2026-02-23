@@ -793,7 +793,10 @@ export default function TypingPractice() {
       stopPractice();
       resetReview();
       setIsDrawerOpen(true);
-      incrementCompletedRounds(practiceSlot, mode, totalCount);
+      // 문장모드는 문장 하나씩 이미 카운트했으므로 라운드 완료 시 중복 카운트 방지
+      if (mode !== "sentences") {
+        incrementCompletedRounds(practiceSlot, mode, totalCount);
+      }
       // 복습 완료 시 복습 상태 해제
       if (isSentenceReview) {
         setIsSentenceReview(false);
@@ -1046,6 +1049,10 @@ export default function TypingPractice() {
           ? inputClean.endsWith(targetClean) && targetClean.length > 0
           : value.trim() === autoSubmitTarget;
         submitAnswer(value);
+        // 문장모드: 문장 하나 제출할 때마다 즉시 완료 카운트 +1
+        if (mode === "sentences") {
+          incrementCompletedRounds(practiceSlot, mode, 1);
+        }
         if (isPositionMode) {
           const fromChar = currentWordIndex > 0 ? shuffledWords[currentWordIndex - 1] : "";
           const toChar = shuffledWords[currentWordIndex] || "";
@@ -3852,7 +3859,6 @@ export default function TypingPractice() {
               ["sequential", "보고치라"],
               ["batch", "매매치라"],
               ["longtext", "긴글"],
-              ["random", "랜덤"],
               ["words", "단어"],
               ["sentences", "문장"],
               ["position", "자리"],
