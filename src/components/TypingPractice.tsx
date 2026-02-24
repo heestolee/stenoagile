@@ -210,6 +210,7 @@ export default function TypingPractice() {
     addSentence,
     setTotalCount,
     resumeSentencePractice,
+    lastSentenceTyped,
   } = useTypingStore();
   const { user, signOut } = useAuth();
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -231,6 +232,7 @@ export default function TypingPractice() {
   } = useSlotManager(inputText);
   const [displayFontSize, setDisplayFontSize] = useState(20); // 위쪽 표시 영역 글자 크기
   const [inputFontSize, setInputFontSize] = useState(19.5); // 아래쪽 타이핑 영역 글자 크기
+  const [rankFontSize, setRankFontSize] = useState(12); // 최고타/최저타 문장 글자 크기
   const [charsPerRead, setCharsPerRead] = useState(3); // 몇 글자씩 읽을지
   const [sequentialSpeechRate, setSequentialSpeechRate] = useState(1); // 보고치라 음성 속도 (1배속)
   const { speakText, clearAllTimeouts } = useHeamiVoice(isSoundEnabled, speechRate, sequentialSpeechRate);
@@ -245,6 +247,7 @@ export default function TypingPractice() {
   const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // 타이핑 칸 참조
   const wordInputRef = useRef<HTMLInputElement | null>(null); // 단어/문장 모드 입력 칸 참조
   const isAutoSubmittingRef = useRef(false); // 자동 제출 중복 방지
+  const isComposingRef = useRef(false); // 한글 IME 조합 중 여부
   const displayAreaRef = useRef<HTMLDivElement | null>(null); // 원문 표시 영역 참조
 
   // 매매치라 모드 상태
@@ -743,6 +746,7 @@ export default function TypingPractice() {
         if (settings.charsPerRead !== undefined) setCharsPerRead(settings.charsPerRead);
         if (settings.sequentialSpeechRate !== undefined) setSequentialSpeechRate(settings.sequentialSpeechRate);
         if (settings.batchSize !== undefined) setBatchSize(settings.batchSize);
+        if (settings.rankFontSize !== undefined) setRankFontSize(settings.rankFontSize);
       } catch (e) {
         // 파싱 실패 시 기본값 유지
       }
@@ -788,6 +792,30 @@ export default function TypingPractice() {
           accuracy: total > 0 ? (correctCount / total) * 100 : 0,
           totalElapsedTime: totalElapsed,
         });
+      }
+      // 문장모드 첫 라운드 완료 → 최저타 5개 자동 복습
+      if (mode === "sentences" && !isSentenceReview && allResults.length > 0) {
+        const sorted = [...allResults].sort((a, b) => a.kpm - b.kpm);
+        const bottom5 = sorted.slice(0, 5);
+        const reviewSentences = bottom5.map(r => r.chars);
+        stopPractice();
+        resetReview();
+        setIsSentenceReview(true);
+        setRoundCompleteResult(null);
+        setAllResults([]);
+        setSentences(reviewSentences);
+        resumeSentencePractice({
+          sentences: reviewSentences,
+          currentSentenceIndex: 0,
+          progressCount: 0,
+          correctCount: 0,
+          incorrectCount: 0,
+          incorrectWords: [],
+          totalCount: reviewSentences.length,
+        });
+        setIsDrawerOpen(false);
+        setTimeout(() => wordInputRef.current?.focus(), 50);
+        return;
       }
       // 연습 종료 + 드로어 열기 + 라운드 카운트 증가
       stopPractice();
@@ -994,10 +1022,23 @@ export default function TypingPractice() {
     });
   };
 
+  const handleCompositionStart = () => { isComposingRef.current = true; };
+  const handleCompositionEnd = () => { isComposingRef.current = false; };
+
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (isAutoSubmittingRef.current) return; // 자동 제출 직후 IME 잔여 이벤트 무시
     const value = event.target.value;
     updateTypedWord(value);
+
+    // IME 조합 중 onChange마다 타수 카운트 + 타이머 시작 (handleKeyDown에서 229를 무시하므로 여기서 보충)
+    if (isComposingRef.current) {
+      if (!currentWordStartTime) {
+        startCurrentWordTracking();
+        setDisplayElapsedTime(0);
+      }
+      incrementCurrentWordKeystrokes();
+      return; // 자동 제출 로직은 스킵
+    }
 
     // 단어/문장 모드: 입력값이 정답과 일치하면 자동 제출
     // 복습 중이면 복습 단어를 타겟으로 사용
@@ -1025,7 +1066,7 @@ export default function TypingPractice() {
         const charCount = value.trim().replace(/\s+/g, '').length;
         const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
         setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
-        setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
+        setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: autoSubmitTarget }]);
         logResult({ mode, kpm, cpm, elapsedTime: elapsedMs });
       }
       if (isReviewActive) {
@@ -1071,6 +1112,8 @@ export default function TypingPractice() {
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const isIMEComposing = event.nativeEvent.isComposing || event.keyCode === 229;
+
     if (isPositionMode && isPracticing && event.key === " ") {
       event.preventDefault();
       if (!activeSingleStage) return;
@@ -1088,7 +1131,7 @@ export default function TypingPractice() {
       return;
     }
 
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && !isIMEComposing) {
       // 연습 시작 전 99+엔터: 원문이 있는 슬롯 중 랜덤으로 연습 시작
       if (!isPracticing && typedWord.trim() === "99") {
         event.preventDefault();
@@ -1295,7 +1338,8 @@ export default function TypingPractice() {
     }
 
     // 제외된 키가 아니면 타수 증가 (Backspace, Delete, Space 포함)
-    if (!excludedKeys.includes(event.key)) {
+    // IME 조합 중 keyCode 229 이벤트는 중복 카운트 방지
+    if (!excludedKeys.includes(event.key) && !isIMEComposing) {
       // 보고치라/긴글/랜덤 모드에서 라운드 완료 상태일 때 타이핑 시작하면 자동으로 재개
       if ((mode === "sequential" || mode === "longtext" || mode === "random") && isRoundComplete) {
         setIsRoundComplete(false);
@@ -1497,6 +1541,7 @@ export default function TypingPractice() {
       charsPerRead,
       sequentialSpeechRate,
       batchSize,
+      rankFontSize,
     };
     localStorage.setItem('detailSettings', JSON.stringify(settings));
     alert('상세설정이 기본값으로 저장되었습니다');
@@ -2138,6 +2183,26 @@ export default function TypingPractice() {
                     />
                     <span className="text-xs text-gray-500">px</span>
                   </div>
+                  {mode === "sentences" && (
+                    <div className="flex items-center gap-1">
+                      <label className="text-xs whitespace-nowrap">순위문장</label>
+                      <input
+                        type="number"
+                        min={8}
+                        max={32}
+                        step={0.5}
+                        value={rankFontSize}
+                        onChange={(e) => {
+                          const size = parseFloat(e.target.value);
+                          if (!isNaN(size) && size >= 8 && size <= 32) {
+                            setRankFontSize(size);
+                          }
+                        }}
+                        className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-gray-500">px</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -2953,6 +3018,8 @@ export default function TypingPractice() {
                         if (showResumeHighlight) setShowResumeHighlight(false);
                       }}
                       onKeyDown={handleKeyDown}
+                      onCompositionStart={handleCompositionStart}
+                      onCompositionEnd={handleCompositionEnd}
                       lang="ko"
                     />
                   )}
@@ -3507,16 +3574,23 @@ export default function TypingPractice() {
                   })}
                 </div>
               )}
-              {mode === "sentences" && (
-                <div className="flex flex-col items-start gap-1 mb-2">
-                  {[-2, -1].map(offset => {
-                    const idx = currentSentenceIndex + offset;
-                    return idx >= 0 && sentences[idx] ? (
-                      <span key={offset} className="text-gray-400" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px` }}>
-                        {sentences[idx]}
-                      </span>
-                    ) : null;
-                  })}
+              {mode === "sentences" && currentSentenceIndex > 0 && sentences[currentSentenceIndex - 1] && lastSentenceTyped && (
+                <div className="flex flex-col items-start gap-1 mb-3">
+                  <p className="font-bold whitespace-pre-wrap" style={{ fontSize: `${displayFontSize}px` }}>
+                    {sentences[currentSentenceIndex - 1].split("").map((char, i) => {
+                      const typedChar = lastSentenceTyped[i];
+                      if (typedChar === undefined) {
+                        return <span key={i}>{char}</span>;
+                      }
+                      if (typedChar !== char) {
+                        return <span key={i} style={{ color: "red" }}>{char}</span>;
+                      }
+                      return <span key={i}>{char}</span>;
+                    })}
+                  </p>
+                  <p className="whitespace-pre-wrap text-gray-500" style={{ fontSize: `${displayFontSize}px` }}>
+                    {lastSentenceTyped}
+                  </p>
                 </div>
               )}
               {isReviewActive && mode === "words" && (
@@ -3563,18 +3637,83 @@ export default function TypingPractice() {
                 </div>
               )}
               {mode === "sentences" && (
-                <div className="flex flex-col items-start gap-1 mt-2">
-                  {[1, 2].map(offset => {
-                    const idx = currentSentenceIndex + offset;
-                    return idx < sentences.length && sentences[idx] ? (
-                      <span key={offset} className="text-gray-400" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px` }}>
-                        {sentences[idx]}
-                      </span>
-                    ) : null;
-                  })}
-                </div>
+                <>
+                  <input
+                    ref={wordInputRef}
+                    key={`${currentSentenceIndex}`}
+                    autoFocus
+                    type="text"
+                    className="w-full p-2 border rounded mt-1"
+                    style={{ fontSize: `${displayFontSize}px` }}
+                    value={typedWord}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
+                  />
+                  <div className="flex flex-col items-start gap-1 mt-2">
+                    {[1, 2].map(offset => {
+                      const idx = currentSentenceIndex + offset;
+                      return idx < sentences.length && sentences[idx] ? (
+                        <span key={offset} className="text-gray-400" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px` }}>
+                          {sentences[idx]}
+                        </span>
+                      ) : null;
+                    })}
+                  </div>
+                </>
               )}
             </div>
+          )}
+
+          {mode === "sentences" && (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">
+                  <span className="text-blue-600">정답: {correctCount}</span> |{" "}
+                  <span className="text-rose-600">오답: {incorrectCount}</span> |
+                  진행: {totalCount > 0 ? `${progressCount} / ${totalCount}` : progressCount}
+                  {isSentenceReview && isPracticing && (
+                    <> | <span className="font-bold text-purple-600">복습 중</span></>
+                  )}
+                </p>
+              </div>
+              {(() => {
+                const sorted = [...allResults].sort((a, b) => b.kpm - a.kpm);
+                const top3 = sorted.slice(0, 5);
+                const bottom3 = sorted.slice(-5).reverse();
+                return (
+                  <div className="grid grid-cols-1 gap-2 mt-1 text-sm">
+                    <div className="border rounded p-3 bg-blue-50">
+                      <div className="font-bold text-blue-600 mb-1 text-base">최고타</div>
+                      {[0, 1, 2, 3, 4].map(i => (
+                        <div key={i} className="py-0.5">
+                          {top3[i] ? (
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-gray-700 whitespace-nowrap"><span className="font-semibold">{top3[i].kpm}</span><span className="text-gray-500">타</span> <span className="font-semibold">{top3[i].cpm}</span><span className="text-gray-500">자</span></span>
+                              <span className="text-gray-400 break-all" style={{ fontSize: `${rankFontSize}px` }}>{top3[i].chars}</span>
+                            </div>
+                          ) : <span className="text-gray-300">-</span>}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border rounded p-3 bg-rose-50">
+                      <div className="font-bold text-rose-600 mb-1 text-base">최저타</div>
+                      {[0, 1, 2, 3, 4].map(i => (
+                        <div key={i} className="py-0.5">
+                          {bottom3[i] ? (
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-gray-700 whitespace-nowrap"><span className="font-semibold">{bottom3[i].kpm}</span><span className="text-gray-500">타</span> <span className="font-semibold">{bottom3[i].cpm}</span><span className="text-gray-500">자</span></span>
+                              <span className="text-gray-400 break-all" style={{ fontSize: `${rankFontSize}px` }}>{bottom3[i].chars}</span>
+                            </div>
+                          ) : <span className="text-gray-300">-</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
           )}
 
           {positionCycleToast && (
@@ -3582,17 +3721,19 @@ export default function TypingPractice() {
               {positionCycleToast}
             </div>
           )}
-          {mode !== "sequential" && mode !== "longtext" && mode !== "random" && (
+          {mode !== "sequential" && mode !== "longtext" && mode !== "random" && mode !== "sentences" && (
             <>
               <input
                 ref={wordInputRef}
-                key={`${mode === "sentences" ? currentSentenceIndex : currentWordIndex}-${isReviewActive ? `r${currentReviewIndex}` : ''}`}
+                key={`${currentWordIndex}-${isReviewActive ? `r${currentReviewIndex}` : ''}`}
                 autoFocus
                 type="text"
                 className="w-full p-2 border rounded"
                 value={typedWord}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
               />
 
               <div className="flex items-center justify-between">
@@ -3608,9 +3749,6 @@ export default function TypingPractice() {
                   )}
                   {isReviewActive && mode === "words" && (
                     <> | <span className={`font-bold ${reviewType === "failed" ? "text-amber-700" : "text-orange-600"}`}>{reviewType === "failed" ? "2차복습" : "1차복습"}: {currentReviewIndex + 1}/{reviewWords.length}</span></>
-                  )}
-                  {isSentenceReview && mode === "sentences" && isPracticing && (
-                    <> | <span className="font-bold text-purple-600">복습 중</span></>
                   )}
                 </p>
                 {isPositionMode && isPracticing && activeSingleStage && (

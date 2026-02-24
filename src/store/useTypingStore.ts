@@ -79,6 +79,8 @@ interface TypingState {
   incrementDisplayIndex: () => void;
   restartSequentialPractice: () => void;
 
+  lastSentenceTyped: string;
+
   setSentences: (sentences: string[]) => void;
   addSentence: (sentence: string) => void;
   setTotalCount: (count: number) => void;
@@ -249,6 +251,7 @@ export const useTypingStore = create<TypingState>()(
       currentSentenceIndex: 0,
       currentLetterIndex: 0,
       typedWord: "",
+      lastSentenceTyped: "",
       correctCount: 0,
       incorrectCount: 0,
       incorrectWords: [],
@@ -600,6 +603,7 @@ export const useTypingStore = create<TypingState>()(
                 ? (state.currentLetterIndex + 1) % Math.max(state.randomLetters.length, 1)
                 : state.currentLetterIndex,
             typedWord: "",
+            lastSentenceTyped: mode === "sentences" ? input.trim() : state.lastSentenceTyped,
             progressCount: nextProgressCount,
             totalCount: nextTotalCount,
           };
