@@ -9,11 +9,12 @@ export async function generateSentencesStream(
   onModel?: (model: string) => void,
   signal?: AbortSignal,
   preferredModel?: string,
+  previousSentences?: string[],
 ): Promise<void> {
   const response = await fetch("/api/generate-sentences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ words, count, apiKey, style, preferredModel }),
+    body: JSON.stringify({ words, count, apiKey, style, preferredModel, previousSentences }),
     signal,
   });
 

@@ -57,7 +57,8 @@ function extractSentences(accumulated: string): { sentences: string[]; remaining
 
     const raw = text.slice(quoteStart + 1, i).replace(/\\"/g, '"').replace(/\\n/g, '\n');
     // 번호추적 프롬프트의 "1. ", "23. " 등 접두어 제거
-    const sentence = raw.replace(/^\d+\.\s*/, '');
+    // 구두점 앞 불필요한 공백 제거 (예: "했습니다 ." → "했습니다.")
+    const sentence = raw.replace(/^\d+\.\s*/, '').replace(/\s+([.!?,;:·…])/g, '$1');
     sentences.push(sentence);
     text = text.slice(i + 1);
 
@@ -170,12 +171,13 @@ export function claudePlugin(): Plugin {
           const body = await readBody(req);
 
           try {
-            const { words, count, apiKey, style, preferredModel } = JSON.parse(body) as {
+            const { words, count, apiKey, style, preferredModel, previousSentences } = JSON.parse(body) as {
               words: string[];
               count: number;
               apiKey: string;
               style?: string;
               preferredModel?: string;
+              previousSentences?: string[];
             };
 
             if (!apiKey) {
@@ -192,12 +194,21 @@ export function claudePlugin(): Plugin {
               : `자연스러운 ${style || "뉴스/일상 대화체"}로`;
 
             const wordInstruction = isRandomMode
-              ? "자유로운 주제로 다양한 단어를 사용하여"
+              ? "자유로운 주제로 최대한 다양한 단어와 표현을 사용하여"
               : `단어 목록: ${words.join(", ")}\n이 단어들을 포함하여`;
+
+            // 이전 문장이 있으면 중복 방지 지시 추가
+            let avoidInstruction = "";
+            if (previousSentences && previousSentences.length > 0) {
+              // 최근 30개 문장만 샘플로 전달 (토큰 절약)
+              const sample = previousSentences.slice(-30);
+              avoidInstruction = `\n\n아래는 이전에 생성된 문장입니다. 이와 비슷한 문장, 같은 주제, 같은 단어 조합을 절대 반복하지 마세요. 완전히 새로운 주제와 단어를 사용하세요:\n${sample.map(s => `- ${s}`).join("\n")}`;
+            }
 
             const prompt = `정확히 ${count}개의 한국어 문장을 생성하세요.
 ${wordInstruction}
 각 문장 20~50자, ${styleInstruction}.
+문장마다 서로 다른 주제와 어휘를 사용하세요. 같은 단어나 표현이 반복되지 않도록 하세요.${avoidInstruction}
 
 중요: 각 문장 앞에 번호를 붙여서 진행 상황을 추적하세요.
 형식: ["1. 문장내용", "2. 문장내용", ..., "${count}. 문장내용"]
@@ -220,6 +231,7 @@ JSON 배열로만 응답하세요.`;
               const model = GEMINI_MODELS[mi];
               const generationConfig: Record<string, unknown> = {
                 maxOutputTokens: model.maxOutput,
+                temperature: isRandomMode ? 1.5 : 1.0,
               };
               if (model.supportsThinking) {
                 generationConfig.thinkingConfig = { thinkingBudget: 0 };
