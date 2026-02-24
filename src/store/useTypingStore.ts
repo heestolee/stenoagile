@@ -630,6 +630,15 @@ export const useTypingStore = create<TypingState>()(
         speechRate: state.speechRate,
         isSoundEnabled: state.isSoundEnabled,
         sequentialSpeed: state.sequentialSpeed,
+        sentences: state.sentences,
+        currentSentenceIndex: state.currentSentenceIndex,
+        // 문장모드 진행 상태 persist (새로고침 후 자동 재개용)
+        progressCount: state.mode === "sentences" ? state.progressCount : undefined,
+        correctCount: state.mode === "sentences" ? state.correctCount : undefined,
+        incorrectCount: state.mode === "sentences" ? state.incorrectCount : undefined,
+        incorrectWords: state.mode === "sentences" ? state.incorrectWords : undefined,
+        totalCount: state.mode === "sentences" ? state.totalCount : undefined,
+        isPracticing: state.mode === "sentences" ? state.isPracticing : undefined,
       }),
     }
   )

@@ -219,6 +219,7 @@ export default function TypingPractice() {
   const isWordLikeMode = mode === "words" || mode === "position";
 
   const [showText, setShowText] = useState(true);
+  const [practicingMode, setPracticingMode] = useState<string | null>(null); // 연습 시작한 모드 추적
   const [showPositionKeyboard, setShowPositionKeyboard] = useState(true);
   const [hoveredPositionKeyId, setHoveredPositionKeyId] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0, elapsedTime: 0 });
@@ -241,13 +242,22 @@ export default function TypingPractice() {
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isRoundComplete, setIsRoundComplete] = useState(false); // 라운드 완료 상태 (결과 확인 대기)
   const [isSentenceReview, setIsSentenceReview] = useState(false); // 문장모드 복습 중 여부
+  const [preReviewResults, setPreReviewResults] = useState<typeof allResults>([]); // 복습 전 최고타/최저타 보존용
   const [accumulatedKeystrokes, setAccumulatedKeystrokes] = useState(0); // 누적 타수
   const [accumulatedElapsedMs, setAccumulatedElapsedMs] = useState(0); // 누적 경과 시간
   const [displayElapsedTime, setDisplayElapsedTime] = useState(0); // 실시간 표시용 경과 시간
   const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // 타이핑 칸 참조
   const wordInputRef = useRef<HTMLInputElement | null>(null); // 단어/문장 모드 입력 칸 참조
+  const practiceInputRef = useRef<HTMLTextAreaElement | null>(null); // 연습 칸 참조
   const isAutoSubmittingRef = useRef(false); // 자동 제출 중복 방지
   const isComposingRef = useRef(false); // 한글 IME 조합 중 여부
+  const pendingCompositionEndRef = useRef(false); // 조합 완료 후 자동제출 재체크 플래그
+
+  // input을 직접 클리어하는 헬퍼 (uncontrolled input용)
+  const clearInputElement = () => {
+    if (wordInputRef.current) wordInputRef.current.value = "";
+    if (typingTextareaRef.current) typingTextareaRef.current.value = "";
+  };
   const displayAreaRef = useRef<HTMLDivElement | null>(null); // 원문 표시 영역 참조
 
   // 매매치라 모드 상태
@@ -747,11 +757,43 @@ export default function TypingPractice() {
         if (settings.sequentialSpeechRate !== undefined) setSequentialSpeechRate(settings.sequentialSpeechRate);
         if (settings.batchSize !== undefined) setBatchSize(settings.batchSize);
         if (settings.rankFontSize !== undefined) setRankFontSize(settings.rankFontSize);
+        if (settings.speechRate !== undefined) useTypingStore.getState().changeSpeechRate(settings.speechRate);
       } catch (e) {
         // 파싱 실패 시 기본값 유지
       }
     }
+    // 모드별 상세설정 로드
+    const modeKey = mode === "sentences" ? 'detailSettings_sentences'
+      : mode === "position" ? 'detailSettings_position'
+      : (mode === "words") ? 'detailSettings_words'
+      : null;
+    if (modeKey) {
+      const modeSaved = localStorage.getItem(modeKey);
+      if (modeSaved) {
+        try {
+          const s = JSON.parse(modeSaved);
+          if (s.speechRate !== undefined) useTypingStore.getState().changeSpeechRate(s.speechRate);
+          if (s.displayFontSize !== undefined) setDisplayFontSize(s.displayFontSize);
+          if (s.rankFontSize !== undefined) setRankFontSize(s.rankFontSize);
+          if (s.showText !== undefined) setShowText(s.showText);
+          if (s.isSoundEnabled !== undefined && s.isSoundEnabled !== isSoundEnabled) toggleSound();
+          if (s.showPositionKeyboard !== undefined) setShowPositionKeyboard(s.showPositionKeyboard);
+        } catch (e) {
+          // 파싱 실패 시 기본값 유지
+        }
+      }
+    }
   }, []);
+
+  // 문장모드 새로고침 후 자동 재개
+  useEffect(() => {
+    if (isPracticing && mode === "sentences" && sentences.length > 0) {
+      // persist로 복원된 상태 — 입력 필드에 포커스
+      setTimeout(() => {
+        wordInputRef.current?.focus();
+      }, 100);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // 단어/문장/자리 모드 라운드 완료 감지
@@ -802,6 +844,7 @@ export default function TypingPractice() {
         resetReview();
         setIsSentenceReview(true);
         setRoundCompleteResult(null);
+        setPreReviewResults([...allResults]);
         setAllResults([]);
         setSentences(reviewSentences);
         resumeSentencePractice({
@@ -954,7 +997,7 @@ export default function TypingPractice() {
     setAccumulatedKeystrokes(0);
     setAccumulatedElapsedMs(0);
     setDisplayElapsedTime(0);
-    updateTypedWord(""); // 타이핑 칸 초기화
+    updateTypedWord(""); clearInputElement(); // 타이핑 칸 초기화
     setPracticeText(""); // 연습 텍스트 초기화
     setShowResumeHighlight(false); // 하이라이트 초기화
     resetBatchAndReviewState();
@@ -1023,10 +1066,15 @@ export default function TypingPractice() {
   };
 
   const handleCompositionStart = () => { isComposingRef.current = true; };
-  const handleCompositionEnd = () => { isComposingRef.current = false; };
+  const handleCompositionEnd = () => {
+    isComposingRef.current = false;
+    // 조합 완료 직후 자동제출 체크를 위해 다음 tick에서 handleInputChange 재실행
+    // (한글 조합 중 space가 포함된 약어에서 띄어쓰기 씹힘 방지)
+    pendingCompositionEndRef.current = true;
+  };
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    if (isAutoSubmittingRef.current) return; // 자동 제출 직후 IME 잔여 이벤트 무시
+    if (isAutoSubmittingRef.current) { clearInputElement(); return; } // 자동 제출 직후 잔여 입력(띄어쓰기 등) 클리어
     const value = event.target.value;
     updateTypedWord(value);
 
@@ -1038,6 +1086,12 @@ export default function TypingPractice() {
       }
       incrementCurrentWordKeystrokes();
       return; // 자동 제출 로직은 스킵
+    }
+
+    // 조합 완료 직후: 타수 카운트 보충 후 자동제출 체크 진행
+    if (pendingCompositionEndRef.current) {
+      pendingCompositionEndRef.current = false;
+      incrementCurrentWordKeystrokes();
     }
 
     // 단어/문장 모드: 입력값이 정답과 일치하면 자동 제출
@@ -1080,7 +1134,7 @@ export default function TypingPractice() {
         if (reviewCorrect && reviewType === "failed") {
           setReviewFailedWords(prev => prev.filter(item => item.word !== reviewTarget));
         }
-        updateTypedWord("");
+        updateTypedWord(""); clearInputElement();
       } else {
         // 일반 모드: 제출 + 숙련도 기록 + 복습 체크
         const target = isWordLikeMode ? shuffledWords[currentWordIndex] : autoSubmitTarget;
@@ -1106,6 +1160,7 @@ export default function TypingPractice() {
         }
       }
       resetCurrentWordTracking();
+      clearInputElement();
       // IME의 후속 onChange 이벤트가 중복 제출하지 않도록 잠시 가드
       setTimeout(() => { isAutoSubmittingRef.current = false; }, 50);
     }
@@ -1113,6 +1168,13 @@ export default function TypingPractice() {
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const isIMEComposing = event.nativeEvent.isComposing || event.keyCode === 229;
+
+    // Tab 키: 메인 입력칸 ↔ 연습 칸 전환 (문장모드)
+    if (event.key === "Tab" && mode === "sentences") {
+      event.preventDefault();
+      practiceInputRef.current?.focus();
+      return;
+    }
 
     if (isPositionMode && isPracticing && event.key === " ") {
       event.preventDefault();
@@ -1150,7 +1212,7 @@ export default function TypingPractice() {
           const savedText = localStorage.getItem(`slot_${randomSlot}`);
           if (savedText) {
             updateInputText(savedText);
-            updateTypedWord("");
+            updateTypedWord(""); clearInputElement();
             setSelectedSlot(randomSlot);
             // 연습 시작
             const words = savedText.split(/\s+/).filter((w) => w.length > 0);
@@ -1271,7 +1333,10 @@ export default function TypingPractice() {
           const charCount = typedWord.trim().replace(/\s+/g, '').length;
           const cpm = Math.min(3000, Math.round(charCount / elapsedMinutes));
           setLastResult({ kpm, cpm, elapsedTime: elapsedMs });
-          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: '' }]);
+          const currentChars = mode === "sentences" && sentences[currentSentenceIndex]
+            ? sentences[currentSentenceIndex].trim()
+            : shuffledWords[currentWordIndex]?.trim() || '';
+          setAllResults(prev => [...prev, { kpm, cpm, elapsedTime: elapsedMs, chars: currentChars }]);
           // Google Sheets 로깅
           logResult({ mode, kpm, cpm, elapsedTime: elapsedMs });
         }
@@ -1291,7 +1356,7 @@ export default function TypingPractice() {
           }
         }
         resetCurrentWordTracking();
-        updateTypedWord("");
+        updateTypedWord(""); clearInputElement();
         return;
       }
 
@@ -1362,6 +1427,7 @@ export default function TypingPractice() {
     alreadyGenerated: number,
     isAppending: boolean,
     batchSize = 2500,
+    existingSentences?: string[],
   ) => {
     setGenerateError(null);
     setIsGenerating(true);
@@ -1420,6 +1486,7 @@ export default function TypingPractice() {
         (model) => { aiModelNameRef.current = model; setAiModelName(model); incrementApiCallCount(); },
         abortController.signal,
         selectedModel,
+        existingSentences,
       );
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -1477,6 +1544,7 @@ export default function TypingPractice() {
       }
       stopPractice();
       resetReview();
+      setPracticingMode(null);
       // 드로어 열기
       setIsDrawerOpen(true);
       // 타이핑칸에 포커스
@@ -1488,8 +1556,9 @@ export default function TypingPractice() {
         // 이전 라운드 결과 초기화
         setRoundCompleteResult(null);
         resetBatchAndReviewState();
-        // 연습 시작 시 현재 슬롯 저장
+        // 연습 시작 시 현재 슬롯/모드 저장
         setPracticeSlot(selectedSlot);
+        setPracticingMode(mode);
         // 드로어 닫기
         setIsDrawerOpen(false);
         if (mode === "longtext" || mode === "sequential" || mode === "random") {
@@ -1542,6 +1611,7 @@ export default function TypingPractice() {
       sequentialSpeechRate,
       batchSize,
       rankFontSize,
+      speechRate,
     };
     localStorage.setItem('detailSettings', JSON.stringify(settings));
     alert('상세설정이 기본값으로 저장되었습니다');
@@ -1622,7 +1692,7 @@ export default function TypingPractice() {
             .map(idx => sequentialText[idx])
             .join('');
           setCurrentBatchChars(batchChars);
-          updateTypedWord(""); // 새 배치 시작 시 타이핑 칸 비우기
+          updateTypedWord(""); clearInputElement(); // 새 배치 시작 시 타이핑 칸 비우기
 
           // 소리 재생
           if (isSoundEnabled && batchChars) {
@@ -1719,7 +1789,7 @@ export default function TypingPractice() {
           // 다음 복습 배치
           setReviewIndex(nextReviewIndex);
           setCurrentBatchChars("");
-          updateTypedWord("");
+          updateTypedWord(""); clearInputElement();
         }
         return;
       }
@@ -1742,7 +1812,7 @@ export default function TypingPractice() {
               setIsReviewMode(true);
               setBatchRandomFillCount(0);
               setCurrentBatchChars("");
-              updateTypedWord("");
+              updateTypedWord(""); clearInputElement();
             }, 0);
           } else {
             // 결과가 없으면 바로 라운드 완료
@@ -1757,7 +1827,7 @@ export default function TypingPractice() {
         // 다음 배치 준비
         setBatchStartIndex(nextBatchStart);
         setCurrentBatchChars("");
-        updateTypedWord("");
+        updateTypedWord(""); clearInputElement();
       }
     }
   }, [typedWord, currentBatchChars, isPracticing, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isRoundComplete, currentWordStartTime, currentWordKeystrokes, accumulatedKeystrokes, accumulatedElapsedMs, isReviewMode, reviewIndex, reviewBatches]);
@@ -2145,7 +2215,48 @@ export default function TypingPractice() {
             {/* 단어/문장 모드: 상세설정 */}
             {(isWordLikeMode || mode === "sentences") && (
               <div className="space-y-2 border-t pt-2">
-                <div className="text-sm font-semibold text-gray-600">상세설정</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-semibold text-gray-600">상세설정</div>
+                  {mode === "sentences" && (
+                    <button
+                      className="px-2 py-0.5 rounded text-xs font-medium transition bg-gray-500 text-white hover:bg-gray-600"
+                      onClick={() => {
+                        localStorage.setItem('detailSettings_sentences', JSON.stringify({
+                          speechRate, displayFontSize, rankFontSize, showText, isSoundEnabled,
+                        }));
+                        alert('문장모드 상세설정이 기본값으로 저장되었습니다');
+                      }}
+                    >
+                      기본값 저장
+                    </button>
+                  )}
+                  {isWordLikeMode && !isPositionMode && (
+                    <button
+                      className="px-2 py-0.5 rounded text-xs font-medium transition bg-gray-500 text-white hover:bg-gray-600"
+                      onClick={() => {
+                        localStorage.setItem('detailSettings_words', JSON.stringify({
+                          speechRate, displayFontSize, showText, isSoundEnabled,
+                        }));
+                        alert('단어모드 상세설정이 기본값으로 저장되었습니다');
+                      }}
+                    >
+                      기본값 저장
+                    </button>
+                  )}
+                  {isPositionMode && (
+                    <button
+                      className="px-2 py-0.5 rounded text-xs font-medium transition bg-gray-500 text-white hover:bg-gray-600"
+                      onClick={() => {
+                        localStorage.setItem('detailSettings_position', JSON.stringify({
+                          speechRate, displayFontSize, showText, isSoundEnabled, showPositionKeyboard,
+                        }));
+                        alert('자리모드 상세설정이 기본값으로 저장되었습니다');
+                      }}
+                    >
+                      기본값 저장
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">음성속도</label>
@@ -2394,7 +2505,7 @@ export default function TypingPractice() {
                           setBatchSize(size);
                           if (isPracticing && isBatchMode && !isReviewMode) {
                             setCurrentBatchChars("");
-                            updateTypedWord("");
+                            updateTypedWord(""); clearInputElement();
                           }
                         }
                       }}
@@ -2566,17 +2677,46 @@ export default function TypingPractice() {
               <div className="flex items-center gap-4">
                 <button
                   className={`px-4 py-2 rounded font-semibold transition ${
-                    isPracticing || (mode === "sentences" && isGenerating)
+                    practicingMode === mode || (mode === "sentences" && isGenerating)
                       ? "bg-gray-500 text-white hover:bg-gray-600"
                       : "bg-blue-500 text-white hover:bg-blue-600"
                   }`}
                   onClick={handleStartOrStopPractice}
                 >
-                  {isGenerating ? "문장 생성 중..." : isPracticing && mode === "sentences" && generatedCount > 0 ? "문장 생성 완료" : isPracticing ? "연습 종료" : mode === "sentences" ? "문장 생성 시작" : "연습 시작"}
+                  {mode === "sentences"
+                    ? (isGenerating ? "문장 생성 중..." : practicingMode === "sentences" && generatedCount > 0 ? "문장 생성 완료" : "문장 생성 시작")
+                    : (practicingMode === mode ? "연습 종료" : "연습 시작")
+                  }
+                </button>
+                <button
+                  className="px-3 py-2 rounded font-semibold text-sm bg-orange-400 text-white hover:bg-orange-500 transition"
+                  onClick={() => {
+                    if (isGenerating) {
+                      generateAbortRef.current?.abort();
+                    }
+                    if (practicingMode === "sentences") {
+                      stopPractice();
+                      setPracticingMode(null);
+                    }
+                    setSentences([]);
+                    setGeneratedCount(0);
+                    setTotalCount(0);
+                    setCanGenerateMore(false);
+                    setGenerateError(null);
+                    setIsSentenceReview(false);
+                    setAllResults([]);
+                    setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
+                    updateTypedWord(""); clearInputElement();
+                    setPracticeText("");
+                    savedSentenceStateRef.current = null;
+                    setTimeout(() => wordInputRef.current?.focus(), 0);
+                  }}
+                >
+                  초기화
                 </button>
                 {todayCompletedRounds > 0 && (
                   <span className="text-sm text-gray-600 font-medium">
-                    오늘 {todayCompletedRounds}회 완료
+                    오늘 {todayCompletedRounds} 문장 완료
                   </span>
                 )}
                 {mode === "sentences" && generateError && (
@@ -2616,7 +2756,7 @@ export default function TypingPractice() {
                         className="text-xs px-2 py-0.5 rounded-full bg-blue-500 text-white hover:bg-blue-600 font-medium ml-0.5"
                         onClick={() => {
                           const words = useRandomSentences ? [] : inputText.trim().split("/").filter(Boolean);
-                          generateMoreSentences(words, sentenceTargetCountRef.current, generatedCount, true);
+                          generateMoreSentences(words, sentenceTargetCountRef.current, generatedCount, true, 2500, sentences);
                         }}
                       >
                         추가생성
@@ -2723,13 +2863,13 @@ export default function TypingPractice() {
               <div className="flex items-center gap-4">
                 <button
                   className={`px-4 py-2 rounded font-semibold transition ${
-                    isPracticing || countdown !== null
+                    practicingMode === mode || countdown !== null
                       ? "bg-gray-500 text-white hover:bg-gray-600"
                       : "bg-blue-500 text-white hover:bg-blue-600"
                   }`}
                   onClick={handleStartOrStopPractice}
                 >
-                  {countdown !== null ? `${countdown}초` : isPracticing ? "연습 종료" : "연습 시작"}
+                  {countdown !== null ? `${countdown}초` : practicingMode === mode ? "연습 종료" : "연습 시작"}
                 </button>
               </div>
 
@@ -3012,7 +3152,6 @@ export default function TypingPractice() {
                         imeMode: 'active'
                       } as React.CSSProperties}
                       placeholder="여기에 타이핑하세요"
-                      value={typedWord}
                       onChange={(e) => {
                         updateTypedWord(e.target.value);
                         if (showResumeHighlight) setShowResumeHighlight(false);
@@ -3400,7 +3539,6 @@ export default function TypingPractice() {
                   className="w-full h-full p-4 border-2 border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                   style={{ fontSize: `${inputFontSize}px`, lineHeight: 1.5, imeMode: 'active' } as React.CSSProperties}
                   placeholder="여기에 타이핑하세요"
-                  value={typedWord}
                   onChange={(e) => updateTypedWord(e.target.value)}
                   onKeyDown={handleKeyDown}
                   lang="ko"
@@ -3604,10 +3742,15 @@ export default function TypingPractice() {
                   : mode === "sentences"
                   ? (() => {
                       const target = sentences[currentSentenceIndex] || "";
+                      const composing = isComposingRef.current;
+                      // 조합 중이면 마지막 글자는 아직 확정되지 않았으므로 비교 범위에서 제외
+                      const confirmedLen = composing && typedWord.length > 0
+                        ? typedWord.length - 1
+                        : typedWord.length;
                       return target.split("").map((char, i) => {
                         let style: React.CSSProperties = {};
                         let displayChar = char;
-                        if (i < typedWord.length) {
+                        if (i < confirmedLen) {
                           if (typedWord[i] === char) {
                             style = { color: "blue" };
                           } else {
@@ -3618,6 +3761,9 @@ export default function TypingPractice() {
                               style = { color: "red", textDecoration: "underline" };
                             }
                           }
+                        } else if (i === confirmedLen && composing) {
+                          // 현재 조합 중인 글자: 중립 색상 (회색)
+                          style = { color: "#9CA3AF" };
                         }
                         return <span key={i} style={style}>{displayChar}</span>;
                       });
@@ -3640,12 +3786,12 @@ export default function TypingPractice() {
                 <>
                   <input
                     ref={wordInputRef}
-                    key={`${currentSentenceIndex}`}
+                    key={`${currentSentenceIndex}-${isSentenceReview ? 'review' : 'main'}`}
                     autoFocus
+                    autoComplete="off"
                     type="text"
                     className="w-full p-2 border rounded mt-1"
                     style={{ fontSize: `${displayFontSize}px` }}
-                    value={typedWord}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
                     onCompositionStart={handleCompositionStart}
@@ -3678,8 +3824,39 @@ export default function TypingPractice() {
                   )}
                 </p>
               </div>
+              <div className="border rounded p-3 bg-gray-50 mt-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-gray-600 text-base">연습 칸</span>
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <span>{practiceText.length}자</span>
+                    {practiceText.length > 0 && (
+                      <button
+                        className="px-2 py-0.5 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-xs"
+                        onClick={() => { setPracticeText(""); if (practiceInputRef.current) practiceInputRef.current.value = ""; }}
+                      >
+                        지우기
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <textarea
+                  ref={practiceInputRef}
+                  className="w-full p-2 border rounded resize-none"
+                  rows={3}
+                  placeholder="Tab 키로 이동하여 자유롭게 연습..."
+                  value={practiceText}
+                  onChange={(e) => setPracticeText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Tab") {
+                      e.preventDefault();
+                      wordInputRef.current?.focus();
+                    }
+                  }}
+                />
+              </div>
               {(() => {
-                const sorted = [...allResults].sort((a, b) => b.kpm - a.kpm);
+                const displayResults = isSentenceReview && allResults.length === 0 ? preReviewResults : allResults;
+                const sorted = [...displayResults].sort((a, b) => b.kpm - a.kpm);
                 const top3 = sorted.slice(0, 5);
                 const bottom3 = sorted.slice(-5).reverse();
                 return (
@@ -3727,9 +3904,9 @@ export default function TypingPractice() {
                 ref={wordInputRef}
                 key={`${currentWordIndex}-${isReviewActive ? `r${currentReviewIndex}` : ''}`}
                 autoFocus
+                autoComplete="off"
                 type="text"
                 className="w-full p-2 border rounded"
-                value={typedWord}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 onCompositionStart={handleCompositionStart}
