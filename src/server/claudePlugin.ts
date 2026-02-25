@@ -200,9 +200,7 @@ export function claudePlugin(): Plugin {
             // 이전 문장이 있으면 중복 방지 지시 추가
             let avoidInstruction = "";
             if (previousSentences && previousSentences.length > 0) {
-              // 최근 30개 문장만 샘플로 전달 (토큰 절약)
-              const sample = previousSentences.slice(-30);
-              avoidInstruction = `\n\n아래는 이전에 생성된 문장입니다. 이와 비슷한 문장, 같은 주제, 같은 단어 조합을 절대 반복하지 마세요. 완전히 새로운 주제와 단어를 사용하세요:\n${sample.map(s => `- ${s}`).join("\n")}`;
+              avoidInstruction = `\n\n아래는 이전에 생성된 문장입니다. 이와 비슷한 문장, 같은 주제, 같은 단어 조합을 절대 반복하지 마세요. 완전히 새로운 주제와 단어를 사용하세요:\n${previousSentences.map(s => `- ${s}`).join("\n")}`;
             }
 
             const prompt = `정확히 ${count}개의 한국어 문장을 생성하세요.
