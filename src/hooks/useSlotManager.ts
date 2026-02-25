@@ -141,7 +141,8 @@ export function useSlotManager(inputText: string) {
       return;
     }
     localStorage.setItem(`slot_${selectedSlot}`, inputText);
-    alert(`슬롯 ${selectedSlot}에 저장되었습니다`);
+    const name = slotNames[selectedSlot] || `슬롯 ${selectedSlot}`;
+    alert(`${name}에 저장되었습니다`);
   };
 
   return {

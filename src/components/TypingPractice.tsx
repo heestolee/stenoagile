@@ -1093,6 +1093,8 @@ export default function TypingPractice() {
           composingRAFRef.current = null;
           const latest = wordInputRef.current?.value ?? typingTextareaRef.current?.value ?? '';
           updateTypedWord(latest);
+          // 조합 중에도 자동제출 체크 (한글 마지막 글자가 조합 중일 때 endsWith 매칭)
+          tryAutoSubmit(latest);
         });
       }
       return;
@@ -1108,6 +1110,10 @@ export default function TypingPractice() {
       for (let i = 0; i < pending; i++) incrementCurrentWordKeystrokes();
     }
 
+    tryAutoSubmit(value);
+  };
+
+  const tryAutoSubmit = (value: string) => {
     // 단어/문장 모드: 입력값이 정답과 일치하면 자동 제출
     // 복습 중이면 복습 단어를 타겟으로 사용
     const autoSubmitTarget =
@@ -2658,9 +2664,34 @@ export default function TypingPractice() {
             </>
           )}
           {(mode === "words" || mode === "sentences") && !isPositionMode && inputText.trim() && (
-            <p className="text-xs text-gray-500">
-              단어 {inputText.trim().split("/").filter(Boolean).length}개
-            </p>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500">단어 {inputText.trim().split("/").filter(Boolean).length}개</span>
+              {(() => {
+                const words = inputText.trim().split("/").filter(Boolean).map(w => w.trim());
+                const seen = new Map<string, number>();
+                const dupes: string[] = [];
+                for (const w of words) {
+                  seen.set(w, (seen.get(w) || 0) + 1);
+                }
+                for (const [w, count] of seen) {
+                  if (count > 1) dupes.push(`${w}(${count})`);
+                }
+                return dupes.length > 0 ? (
+                  <span className="text-red-500 font-medium">중복: {dupes.join(", ")}</span>
+                ) : (
+                  <span className="text-green-500 font-medium">중복 없음</span>
+                );
+              })()}
+              <button
+                className="px-2 py-0.5 bg-gray-200 hover:bg-gray-300 rounded text-gray-600"
+                onClick={() => {
+                  const sorted = inputText.trim().split("/").filter(Boolean).map(w => w.trim()).sort((a, b) => a.localeCompare(b, 'ko'));
+                  updateInputText(sorted.join("/"));
+                }}
+              >
+                가나다순
+              </button>
+            </div>
           )}
           {mode !== "random" && !isPositionMode && (
             <>
@@ -2714,6 +2745,7 @@ export default function TypingPractice() {
                     : (practicingMode === mode ? "연습 종료" : "연습 시작")
                   }
                 </button>
+                {mode === "sentences" && (
                 <button
                   className="px-3 py-2 rounded font-semibold text-sm bg-orange-400 text-white hover:bg-orange-500 transition"
                   onClick={() => {
@@ -2740,6 +2772,7 @@ export default function TypingPractice() {
                 >
                   초기화
                 </button>
+                )}
                 {todayCompletedRounds > 0 && (
                   <span className="text-sm text-gray-600 font-medium">
                     오늘 {todayCompletedRounds} 문장 완료
@@ -3824,6 +3857,7 @@ export default function TypingPractice() {
                     type="text"
                     className="w-full p-2 border rounded mt-1"
                     style={{ fontSize: `${displayFontSize}px` }}
+                    placeholder="Tab 키로 연습 칸으로 이동"
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
                     onCompositionStart={handleCompositionStart}
