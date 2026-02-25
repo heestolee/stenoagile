@@ -252,6 +252,9 @@ export default function TypingPractice() {
   const isAutoSubmittingRef = useRef(false); // 자동 제출 중복 방지
   const isComposingRef = useRef(false); // 한글 IME 조합 중 여부
   const pendingCompositionEndRef = useRef(false); // 조합 완료 후 자동제출 재체크 플래그
+  const composingKeystrokesRef = useRef(0); // 조합 중 타수 카운트 (ref로 관리하여 리렌더 방지)
+  const composingRAFRef = useRef<number | null>(null); // 조합 중 RAF 디바운스 ID
+  const elapsedTimerRef = useRef<HTMLSpanElement | null>(null); // 경과시간 DOM 직접 업데이트용
 
   // input을 직접 클리어하는 헬퍼 (uncontrolled input용)
   const clearInputElement = () => {
@@ -863,6 +866,7 @@ export default function TypingPractice() {
       // 연습 종료 + 드로어 열기 + 라운드 카운트 증가
       stopPractice();
       resetReview();
+      setPracticingMode(null);
       setIsDrawerOpen(true);
       // 문장모드는 문장 하나씩 이미 카운트했으므로 라운드 완료 시 중복 카운트 방지
       if (mode !== "sentences") {
@@ -1066,32 +1070,42 @@ export default function TypingPractice() {
   };
 
   const handleCompositionStart = () => { isComposingRef.current = true; };
-  const handleCompositionEnd = () => {
+  const handleCompositionEnd = (event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     isComposingRef.current = false;
-    // 조합 완료 직후 자동제출 체크를 위해 다음 tick에서 handleInputChange 재실행
-    // (한글 조합 중 space가 포함된 약어에서 띄어쓰기 씹힘 방지)
+    // 조합 완료 직후: 최종 입력값을 state에 동기화 (조합 중 리렌더 스킵했으므로)
+    const value = (event.target as HTMLInputElement | HTMLTextAreaElement).value;
+    updateTypedWord(value);
     pendingCompositionEndRef.current = true;
   };
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (isAutoSubmittingRef.current) { clearInputElement(); return; } // 자동 제출 직후 잔여 입력(띄어쓰기 등) 클리어
     const value = event.target.value;
-    updateTypedWord(value);
 
-    // IME 조합 중 onChange마다 타수 카운트 + 타이머 시작 (handleKeyDown에서 229를 무시하므로 여기서 보충)
+    // IME 조합 중: RAF로 프레임당 최대 1번만 state 업데이트 (리렌더 최소화 + 띄어쓰기 씹힘 방지)
     if (isComposingRef.current) {
       if (!currentWordStartTime) {
         startCurrentWordTracking();
-        setDisplayElapsedTime(0);
       }
-      incrementCurrentWordKeystrokes();
-      return; // 자동 제출 로직은 스킵
+      composingKeystrokesRef.current++;
+      if (composingRAFRef.current === null) {
+        composingRAFRef.current = requestAnimationFrame(() => {
+          composingRAFRef.current = null;
+          const latest = wordInputRef.current?.value ?? typingTextareaRef.current?.value ?? '';
+          updateTypedWord(latest);
+        });
+      }
+      return;
     }
 
-    // 조합 완료 직후: 타수 카운트 보충 후 자동제출 체크 진행
+    updateTypedWord(value);
+
+    // 조합 완료 직후: 조합 중 누적된 타수를 한번에 반영 후 자동제출 체크 진행
     if (pendingCompositionEndRef.current) {
       pendingCompositionEndRef.current = false;
-      incrementCurrentWordKeystrokes();
+      const pending = composingKeystrokesRef.current;
+      composingKeystrokesRef.current = 0;
+      for (let i = 0; i < pending; i++) incrementCurrentWordKeystrokes();
     }
 
     // 단어/문장 모드: 입력값이 정답과 일치하면 자동 제출
@@ -1318,6 +1332,12 @@ export default function TypingPractice() {
         // 첫 번째 엔터: 결과만 보여주고 대기 (라운드 완료 상태로 전환)
         setIsRoundComplete(true);
         // 드로어는 라운드 완료 시에만 열기 (일시정지 시에는 닫힌 상태 유지)
+        return;
+      }
+
+      // 문장모드: 5글자 미만 입력 시 엔터 무시
+      if (mode === "sentences" && isPracticing && typedWord.trim().length < 5) {
+        event.preventDefault();
         return;
       }
 
@@ -1846,15 +1866,21 @@ export default function TypingPractice() {
       return;
     }
 
-    const interval = setInterval(() => {
+    let rafId: number;
+    const tick = () => {
       if (currentWordStartTime) {
         const currentMs = Date.now() - currentWordStartTime;
         const totalMs = accumulatedElapsedMs + currentMs;
-        setDisplayElapsedTime(totalMs);
+        // DOM 직접 업데이트 (React 리렌더 없이 타이머 표시)
+        if (elapsedTimerRef.current) {
+          elapsedTimerRef.current.textContent = `시간: ${formatTime(totalMs)}`;
+        }
       }
-    }, 10);
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
 
-    return () => clearInterval(interval);
+    return () => cancelAnimationFrame(rafId);
   }, [isPracticing, countdown, isRoundComplete, currentWordStartTime, accumulatedElapsedMs]);
 
   // 원문 표시 영역 자동 스크롤 (새 글자가 나올 때 아래로)
@@ -2203,12 +2229,6 @@ export default function TypingPractice() {
                     );
                   })}
                 </div>
-                <button
-                  className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 w-full"
-                  onClick={handleSaveToSlot}
-                >
-                  현재 문장 저장
-                </button>
               </div>
             )}
 
@@ -2645,6 +2665,12 @@ export default function TypingPractice() {
           {mode !== "random" && !isPositionMode && (
             <>
             <span className="text-xs text-gray-500">원문 {inputText.replace(/\s/g, '').length}자</span>
+            <button
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 w-full"
+              onClick={handleSaveToSlot}
+            >
+              현재 문장 저장
+            </button>
             <textarea
               className="w-full p-2 border rounded"
               rows={25}
@@ -2925,7 +2951,7 @@ export default function TypingPractice() {
                           진행: {currentDisplayIndex}/{randomizedIndices.length}
                         </span>
                       )}
-                      <span className="text-orange-600 font-semibold">시간: {formatTime(displayElapsedTime)}</span>
+                      <span ref={elapsedTimerRef} className="text-orange-600 font-semibold">시간: {formatTime(displayElapsedTime)}</span>
                     </>
                   )}
                 </div>
@@ -2937,9 +2963,15 @@ export default function TypingPractice() {
             <div className="flex items-center">
               <div className="flex flex-col space-y-1">
                 <div className="flex items-center space-x-4 text-sm font-medium">
+                  {mode === "sentences" && isSentenceReview && (
+                    <span className="text-red-600">복습: {progressCount}/{totalCount}</span>
+                  )}
+                  {mode === "sentences" && !isSentenceReview && (
+                    <span className="text-purple-600">진행: {progressCount}/{totalCount}</span>
+                  )}
                   {mode !== "words" && <span className="text-green-600">타수: {lastResult.kpm}/분</span>}
                   {mode !== "words" && <span className="text-purple-600">자수: {lastResult.cpm}/분</span>}
-                  <span className="text-orange-600">시간: {formatTime(displayElapsedTime)}</span>
+                  <span ref={elapsedTimerRef} className="text-orange-600">시간: {formatTime(displayElapsedTime)}</span>
                 </div>
                 {mode !== "words" && allResults.length > 0 && allResults.length % 50 === 0 && (
                   <div className="flex items-center space-x-4 text-xs text-gray-600">
