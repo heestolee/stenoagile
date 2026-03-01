@@ -21,6 +21,7 @@ export type PositionStage = Exclude<PositionDifficulty, "random">;
 export interface IncorrectEntry {
   word: string;
   typed: string;
+  resultType?: "half" | "incorrect";
 }
 
 interface TypingState {
@@ -33,6 +34,7 @@ interface TypingState {
   currentLetterIndex: number;
   typedWord: string;
   correctCount: number;
+  halfCorrectCount: number;
   incorrectCount: number;
   incorrectWords: IncorrectEntry[];
   totalCount: number;
@@ -253,6 +255,7 @@ export const useTypingStore = create<TypingState>()(
       typedWord: "",
       lastSentenceTyped: "",
       correctCount: 0,
+      halfCorrectCount: 0,
       incorrectCount: 0,
       incorrectWords: [],
       totalCount: 0,
@@ -454,6 +457,7 @@ export const useTypingStore = create<TypingState>()(
             currentDisplayIndex: 0,
             isPracticing: true,
             correctCount: 0,
+            halfCorrectCount: 0,
             incorrectCount: 0,
             incorrectWords: [],
             totalCount: 0,
@@ -485,6 +489,7 @@ export const useTypingStore = create<TypingState>()(
             currentLetterIndex: 0,
             typedWord: "",
             correctCount: 0,
+            halfCorrectCount: 0,
             incorrectCount: 0,
             incorrectWords: [],
             totalCount:
@@ -509,6 +514,7 @@ export const useTypingStore = create<TypingState>()(
           currentLetterIndex: 0,
           typedWord: "",
           correctCount: 0,
+          halfCorrectCount: 0,
           incorrectCount: 0,
           incorrectWords: [],
           totalCount: 0,
@@ -556,7 +562,10 @@ export const useTypingStore = create<TypingState>()(
             ? sentences[currentSentenceIndex].trim()
             : randomLetters[currentLetterIndex];
 
-        const isCorrect = trimmedInput === target;
+        // 단어모드: 3단계 판정 (완숙/반숙/미숙)
+        const isExactMatch = trimmedInput === target;
+        const isEndsWith = !isExactMatch && trimmedInput.endsWith(target) && target.length > 0;
+        const isCorrect = isExactMatch || isEndsWith;
 
         set((state) => {
           const isLastItem = state.progressCount + 1 >= state.totalCount && state.totalCount > 0;
@@ -584,13 +593,18 @@ export const useTypingStore = create<TypingState>()(
               : (state.currentWordIndex + 1) % Math.max(state.shuffledWords.length, 1);
           }
 
+          // 단어모드: 반숙(endsWith만 매칭)은 incorrectWords에 추가 (복습 대상)
+          const isHalf = mode === "words" && isEndsWith;
+          const isIncorrect = !isCorrect;
+
           return {
-            correctCount: isCorrect ? state.correctCount + 1 : state.correctCount,
-            incorrectCount: !isCorrect
+            correctCount: isExactMatch ? state.correctCount + 1 : state.correctCount,
+            halfCorrectCount: isHalf ? state.halfCorrectCount + 1 : state.halfCorrectCount,
+            incorrectCount: isIncorrect
               ? state.incorrectCount + 1
               : state.incorrectCount,
-            incorrectWords: !isCorrect
-              ? [...state.incorrectWords, { word: target, typed: input.trim() }]
+            incorrectWords: (isHalf || isIncorrect)
+              ? [...state.incorrectWords, { word: target, typed: input.trim(), resultType: (isHalf ? "half" : "incorrect") as "half" | "incorrect" }]
               : state.incorrectWords,
             shuffledWords: nextShuffledWords,
             currentWordIndex: mode === "words" || mode === "position" ? nextWordIndex : state.currentWordIndex,

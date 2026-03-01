@@ -13,8 +13,8 @@ export function useWordProficiency(scope: "words" | "position" = "words") {
   const [todayProficiencies, setTodayProficiencies] = useState<WordProficiency[]>([]);
   const [overallProficiencies, setOverallProficiencies] = useState<WordProficiency[]>([]);
 
-  const recordResult = useCallback((word: string, isCorrect: boolean) => {
-    updateTodayProficiency(word, isCorrect, scope).catch(() => {});
+  const recordResult = useCallback((word: string, result: "correct" | "half" | "incorrect") => {
+    updateTodayProficiency(word, result, scope).catch(() => {});
   }, [scope]);
 
   const refreshToday = useCallback(async () => {
