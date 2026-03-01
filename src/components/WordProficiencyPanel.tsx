@@ -7,11 +7,13 @@ type Filter = "all" | "weak" | "learning" | "master";
 type Tab = "today" | "overall";
 
 function getLevel(p: WordProficiency): Level {
-  const total = p.correctCount + p.incorrectCount;
+  const half = p.halfCorrectCount ?? 0;
+  const total = p.correctCount + half + p.incorrectCount;
   if (total === 0) return "new";
-  const accuracy = p.correctCount / total;
-  if (accuracy >= 0.9 && total >= 5) return "master";
-  if (accuracy >= 0.6) return "learning";
+  // 반숙은 0.5점으로 계산
+  const score = (p.correctCount + half * 0.5) / total;
+  if (score >= 0.9 && total >= 5) return "master";
+  if (score >= 0.6) return "learning";
   return "weak";
 }
 
@@ -61,13 +63,15 @@ function ProficiencyList({ data, sortKey, filter }: { data: WordProficiency[]; s
 
   const sorted = [...filtered].sort((a, b) => {
     if (sortKey === "accuracy") {
-      const totalA = a.correctCount + a.incorrectCount;
-      const totalB = b.correctCount + b.incorrectCount;
-      const accA = totalA > 0 ? a.correctCount / totalA : -1;
-      const accB = totalB > 0 ? b.correctCount / totalB : -1;
+      const halfA = a.halfCorrectCount ?? 0;
+      const halfB = b.halfCorrectCount ?? 0;
+      const totalA = a.correctCount + halfA + a.incorrectCount;
+      const totalB = b.correctCount + halfB + b.incorrectCount;
+      const accA = totalA > 0 ? (a.correctCount + halfA * 0.5) / totalA : -1;
+      const accB = totalB > 0 ? (b.correctCount + halfB * 0.5) / totalB : -1;
       return accA - accB;
     }
-    return (b.correctCount + b.incorrectCount) - (a.correctCount + a.incorrectCount);
+    return (b.correctCount + (b.halfCorrectCount ?? 0) + b.incorrectCount) - (a.correctCount + (a.halfCorrectCount ?? 0) + a.incorrectCount);
   });
 
   if (sorted.length === 0) {
@@ -78,8 +82,9 @@ function ProficiencyList({ data, sortKey, filter }: { data: WordProficiency[]; s
     <>
       {sorted.map((p) => {
         const level = getLevel(p);
-        const total = p.correctCount + p.incorrectCount;
-        const accuracy = total > 0 ? Math.round((p.correctCount / total) * 100) : 0;
+        const half = p.halfCorrectCount ?? 0;
+        const total = p.correctCount + half + p.incorrectCount;
+        const score = total > 0 ? Math.round(((p.correctCount + half * 0.5) / total) * 100) : 0;
         return (
           <div
             key={p.word}
@@ -91,7 +96,7 @@ function ProficiencyList({ data, sortKey, filter }: { data: WordProficiency[]; s
                 {getLevelLabel(level)}
               </span>
               <span className="text-xs text-gray-500">
-                {accuracy}% ({p.correctCount}/{total})
+                {score}% ({p.correctCount}/{half > 0 ? `${half}/` : ""}{p.incorrectCount})
               </span>
             </div>
           </div>

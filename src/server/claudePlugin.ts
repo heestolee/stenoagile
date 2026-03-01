@@ -200,13 +200,19 @@ export function claudePlugin(): Plugin {
             // 이전 문장이 있으면 중복 방지 지시 추가
             let avoidInstruction = "";
             if (previousSentences && previousSentences.length > 0) {
-              avoidInstruction = `\n\n아래는 이전에 생성된 문장입니다. 이와 비슷한 문장, 같은 주제, 같은 단어 조합을 절대 반복하지 마세요. 완전히 새로운 주제와 단어를 사용하세요:\n${previousSentences.map(s => `- ${s}`).join("\n")}`;
+              avoidInstruction = `\n\n[절대 무시하지 마세요 - 중복 방지 목록]\n아래는 이전에 생성된 ${previousSentences.length}개의 문장입니다. 이 목록이 아무리 길어도 반드시 전부 확인하고, 아래 문장과 비슷한 문장, 같은 주제, 같은 문장 구조, 같은 단어 조합을 절대 반복하지 마세요. 완전히 새로운 주제, 새로운 구조, 새로운 어휘로 작성하세요:\n${previousSentences.map(s => `- ${s}`).join("\n")}`;
             }
 
             const prompt = `정확히 ${count}개의 한국어 문장을 생성하세요.
 ${wordInstruction}
 각 문장 20~50자, ${styleInstruction}.
-문장마다 서로 다른 주제와 어휘를 사용하세요. 같은 단어나 표현이 반복되지 않도록 하세요.${avoidInstruction}
+
+다양성 규칙 (매우 중요):
+- 문장 구조를 매번 바꾸세요: 평서문, 의문문, 감탄문, 명령문, 인용문, 조건문 등을 섞으세요.
+- 주어-서술어 패턴을 반복하지 마세요. 주어 생략, 도치, 피동/사동, 접속문, 부사구 시작 등 다양한 구조를 사용하세요.
+- 같은 어미(-습니다, -했다, -한다 등)가 연속으로 반복되지 않게 하세요.
+- 문장의 분위기와 톤도 다양하게: 설명, 묘사, 감정, 사실 전달, 비유, 대화 등을 섞으세요.
+- 같은 단어나 표현이 반복되지 않도록 하세요.${avoidInstruction}
 
 중요: 각 문장 앞에 번호를 붙여서 진행 상황을 추적하세요.
 형식: ["1. 문장내용", "2. 문장내용", ..., "${count}. 문장내용"]

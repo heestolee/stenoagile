@@ -6,6 +6,7 @@ const TODAY_PROFICIENCY_STORE = 'wordProficiencyToday';
 export interface WordProficiency {
   word: string;
   correctCount: number;
+  halfCorrectCount: number;
   incorrectCount: number;
   lastPracticed: number;
 }
@@ -83,7 +84,7 @@ export const clearVideosDB = async () => {
 
 // --- 오늘의 숙련도 ---
 
-export const updateTodayProficiency = async (word: string, isCorrect: boolean, scope?: string): Promise<void> => {
+export const updateTodayProficiency = async (word: string, result: "correct" | "half" | "incorrect", scope?: string): Promise<void> => {
   const db = await openDB();
   const tx = db.transaction(TODAY_PROFICIENCY_STORE, 'readwrite');
   const store = tx.objectStore(TODAY_PROFICIENCY_STORE);
@@ -93,19 +94,14 @@ export const updateTodayProficiency = async (word: string, isCorrect: boolean, s
     const getReq = store.get(key);
     getReq.onsuccess = () => {
       const existing: WordProficiency | undefined = getReq.result;
-      const updated: WordProficiency = existing
-        ? {
-            word: key,
-            correctCount: existing.correctCount + (isCorrect ? 1 : 0),
-            incorrectCount: existing.incorrectCount + (isCorrect ? 0 : 1),
-            lastPracticed: Date.now(),
-          }
-        : {
-            word: key,
-            correctCount: isCorrect ? 1 : 0,
-            incorrectCount: isCorrect ? 0 : 1,
-            lastPracticed: Date.now(),
-          };
+      const base = existing ?? { word: key, correctCount: 0, halfCorrectCount: 0, incorrectCount: 0, lastPracticed: 0 };
+      const updated: WordProficiency = {
+        word: key,
+        correctCount: base.correctCount + (result === "correct" ? 1 : 0),
+        halfCorrectCount: (base.halfCorrectCount ?? 0) + (result === "half" ? 1 : 0),
+        incorrectCount: base.incorrectCount + (result === "incorrect" ? 1 : 0),
+        lastPracticed: Date.now(),
+      };
       store.put(updated);
     };
     tx.oncomplete = () => resolve();
@@ -228,10 +224,11 @@ export const mergeTodayToOverall = async (scope?: string): Promise<void> => {
           ? {
               word: today.word,
               correctCount: existing.correctCount + today.correctCount,
+              halfCorrectCount: (existing.halfCorrectCount ?? 0) + (today.halfCorrectCount ?? 0),
               incorrectCount: existing.incorrectCount + today.incorrectCount,
               lastPracticed: Math.max(existing.lastPracticed, today.lastPracticed),
             }
-          : { ...today };
+          : { ...today, halfCorrectCount: today.halfCorrectCount ?? 0 };
         overallStore.put(merged);
         resolve();
       };

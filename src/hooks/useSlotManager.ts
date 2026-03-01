@@ -78,9 +78,9 @@ export function useSlotManager(inputText: string) {
       [modeKey]: (prev[modeKey] || 0) + amount,
     }));
 
-    // 슬롯별 카운트 (기존 호환성 유지)
+    // 슬롯별 카운트 (보고치라/매매치라만)
     const isBatch = modeKey === "batch";
-    if (slot !== null) {
+    if (slot !== null && (modeKey === "sequential" || modeKey === "batch")) {
       if (isBatch) {
         setSlotCompletedRoundsBatch(prevSlots => {
           const newSlotCounts = { ...prevSlots };
@@ -95,6 +95,24 @@ export function useSlotManager(inputText: string) {
         });
       }
     }
+  }, []);
+
+  // 특정 모드의 완료 횟수 초기화
+  const resetModeCompletedRounds = useCallback((modeKey: string) => {
+    setModeCompletedRounds(prev => {
+      const removed = prev[modeKey] || 0;
+      const next = { ...prev };
+      delete next[modeKey];
+      // todayCompletedRounds도 해당 모드 횟수만큼 감소
+      setTodayCompletedRounds(prevTotal => Math.max(0, prevTotal - removed));
+      // 보고치라/매매치라면 슬롯별 카운트도 초기화
+      if (modeKey === "sequential") {
+        setSlotCompletedRoundsNormal({});
+      } else if (modeKey === "batch") {
+        setSlotCompletedRoundsBatch({});
+      }
+      return next;
+    });
   }, []);
 
   // localStorage에 완료 횟수 저장 (상태 변경 시)
@@ -159,6 +177,7 @@ export function useSlotManager(inputText: string) {
     pendingIncrementSlot,
     setPendingIncrementSlot,
     incrementCompletedRounds,
+    resetModeCompletedRounds,
     handleRenameSlot,
     toggleFavoriteSlot,
     handleSaveToSlot,
