@@ -21,6 +21,18 @@
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync()\"",
+            "description": "작업 완료 시 Windows 알림음"
+          }
+        ]
+      }
     ]
   }
 }

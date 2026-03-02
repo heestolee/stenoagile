@@ -13,6 +13,7 @@ import { useSlotManager } from "../hooks/useSlotManager";
 import { useWordReview } from "../hooks/useWordReview";
 import { useWordProficiency } from "../hooks/useWordProficiency";
 import { useAuth } from "../hooks/useAuth";
+import { longTexts, fromis9Texts } from "../constants/longTexts";
 import LoginPage from "./LoginPage";
 import WordProficiencyPanel from "./WordProficiencyPanel";
 
@@ -290,6 +291,15 @@ export default function TypingPractice() {
     refreshToday, refreshOverall, clearToday, clearOverall, mergeToOverall,
   } = useWordProficiency("words");
   const [showProficiencyPanel, setShowProficiencyPanel] = useState(false);
+  const [longTextClickCount, setLongTextClickCount] = useState(0);
+  const [loadedLongTextInfo, setLoadedLongTextInfo] = useState<{ title: string; source: string; url?: string } | null>(null);
+  const [longTextHistory, setLongTextHistory] = useState<{ title: string; source: string; url?: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('longTextHistory');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [showLongTextHistory, setShowLongTextHistory] = useState(false);
   const [reviewFailedWords, setReviewFailedWords] = useState<{ word: string; typed: string }[]>(() => {
     try {
       const saved = localStorage.getItem('reviewFailedWords');
@@ -723,6 +733,8 @@ export default function TypingPractice() {
     total: number;
     avgKpm: number;
     avgCpm: number;
+    reviewCorrect?: number;
+    reviewTotal?: number;
   } | null>(null);
 
   // 이전 생성 문장 풀 (초기화해도 유지, 최대 300개)
@@ -825,26 +837,38 @@ export default function TypingPractice() {
       progressCount >= totalCount
     ) {
       // 문장모드 복습 완료
+      let finalReviewSnapshot: { originalCorrect: number; originalIncorrect: number; originalTotal: number; reviewCorrect: number; reviewTotal: number } | null = null;
       if (isSentenceReview) {
         const saved = preReviewSentenceStateRef.current;
         const isFinalReview = saved && saved.progressCount >= saved.totalCount;
+        // 마지막 복습 완료 시 원래 진행 상태 + 복습 상태 보존
+        if (isFinalReview && saved) {
+          finalReviewSnapshot = {
+            originalCorrect: saved.correctCount,
+            originalIncorrect: saved.incorrectCount,
+            originalTotal: saved.totalCount,
+            reviewCorrect: correctCount,
+            reviewTotal: totalCount,
+          };
+        }
         setIsSentenceReview(false);
         preReviewSentenceStateRef.current = null;
         if (!isFinalReview && saved) {
           // 중간 복습 완료 → 원래 문장으로 복귀 + 최고타/최저타 초기화
           setAllResults(prev => prev.filter(r => r.mode !== "sentences"));
           setPreReviewResults([]);
-          stopPractice();
-          setSentences(saved.sentences);
+          // stopPractice 없이 직접 resumeSentencePractice로 상태 교체 (isPracticing 깜빡임 방지)
           resumeSentencePractice({
             sentences: saved.sentences,
-            currentSentenceIndex: saved.currentSentenceIndex + 1,
+            currentSentenceIndex: saved.currentSentenceIndex,
             progressCount: saved.progressCount,
             correctCount: saved.correctCount,
             incorrectCount: saved.incorrectCount,
             incorrectWords: saved.incorrectWords,
             totalCount: saved.totalCount,
           });
+          updateTypedWord(""); clearInputElement();
+          useTypingStore.setState({ lastSentenceTyped: "" });
           setTimeout(() => wordInputRef.current?.focus(), 50);
           return;
         }
@@ -900,12 +924,13 @@ export default function TypingPractice() {
         ? Math.round(currentModeResults.reduce((sum, r) => sum + r.cpm, 0) / currentModeResults.length)
         : 0;
       setRoundCompleteResult({
-        correct: correctCount,
+        correct: finalReviewSnapshot ? finalReviewSnapshot.originalCorrect : correctCount,
         halfCorrect: halfCorrectCount,
-        incorrect: incorrectCount,
-        total: totalCount,
+        incorrect: finalReviewSnapshot ? finalReviewSnapshot.originalIncorrect : incorrectCount,
+        total: finalReviewSnapshot ? finalReviewSnapshot.originalTotal : totalCount,
         avgKpm,
         avgCpm,
+        ...(finalReviewSnapshot ? { reviewCorrect: finalReviewSnapshot.reviewCorrect, reviewTotal: finalReviewSnapshot.reviewTotal } : {}),
       });
       // 세션 로깅
       if (currentModeResults.length > 0) {
@@ -1673,6 +1698,7 @@ export default function TypingPractice() {
       stopPractice();
       resetReview();
       setPracticingMode(null);
+      setLoadedLongTextInfo(null);
       // 드로어 열기
       setIsDrawerOpen(true);
       // 타이핑칸에 포커스
@@ -2144,7 +2170,7 @@ export default function TypingPractice() {
         correctCount,
         incorrectCount,
         incorrectWords: [...incorrectWords],
-        totalCount,
+        totalCount: totalCount > 0 ? totalCount : sentences.length,
       };
     }
   };
@@ -2192,7 +2218,7 @@ export default function TypingPractice() {
         correctCount: saved.correctCount,
         incorrectCount: saved.incorrectCount,
         incorrectWords: saved.incorrectWords,
-        totalCount: saved.totalCount,
+        totalCount: saved.totalCount > 0 ? saved.totalCount : saved.sentences.length,
       });
     }
   };
@@ -3065,6 +3091,85 @@ export default function TypingPractice() {
                 >
                   {countdown !== null ? `${countdown}초` : practicingMode === mode ? "연습 종료" : "연습 시작"}
                 </button>
+                {mode === "longtext" && practicingMode !== mode && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      className={`px-4 py-2 rounded font-semibold transition ${
+                        countdown !== null
+                          ? "bg-purple-300 text-white cursor-not-allowed"
+                          : loadedLongTextInfo
+                            ? "bg-green-500 text-white hover:bg-green-600"
+                            : "bg-purple-500 text-white hover:bg-purple-600"
+                      }`}
+                      disabled={countdown !== null}
+                      onClick={() => {
+                        if (!loadedLongTextInfo) {
+                          // 첫 클릭: 글 뽑기만
+                          const nextCount = longTextClickCount + 1;
+                          setLongTextClickCount(nextCount);
+                          let selected: (typeof longTexts)[number];
+                          if (nextCount % 5 === 0) {
+                            selected = fromis9Texts[Math.floor(Math.random() * fromis9Texts.length)];
+                          } else {
+                            selected = longTexts[Math.floor(Math.random() * longTexts.length)];
+                          }
+                          updateInputText(selected.content);
+                          setLoadedLongTextInfo({ title: selected.title, source: selected.source, url: selected.url });
+                          const entry = { title: selected.title, source: selected.source, url: selected.url };
+                          const newHistory = [entry, ...longTextHistory].slice(0, 50);
+                          setLongTextHistory(newHistory);
+                          localStorage.setItem('longTextHistory', JSON.stringify(newHistory));
+                        } else {
+                          // 두 번째 클릭 (드가자): 연습 시작
+                          const words = inputText.trim().split("/").filter(Boolean);
+                          if (words.length > 0) {
+                            setRoundCompleteResult(null);
+                            resetBatchAndReviewState();
+                            setPracticeSlot(selectedSlot);
+                            setPracticingMode("longtext");
+                            setIsDrawerOpen(false);
+                            startCountdown(() => {
+                              setRoundStartTime(Date.now());
+                              startPractice(words);
+                              setTimeout(() => typingTextareaRef.current?.focus(), 50);
+                            });
+                          }
+                        }
+                      }}
+                    >
+                      {countdown !== null ? "드가자" : loadedLongTextInfo ? "드가자" : "랜덤 긴글"}
+                    </button>
+                    {countdown === null && (
+                      <button
+                        className="p-2 rounded transition bg-purple-100 text-purple-600 hover:bg-purple-200 text-sm"
+                        title="다시뽑기"
+                        onClick={() => {
+                          const nextCount = longTextClickCount + 1;
+                          setLongTextClickCount(nextCount);
+                          let selected: (typeof longTexts)[number];
+                          if (nextCount % 5 === 0) {
+                            selected = fromis9Texts[Math.floor(Math.random() * fromis9Texts.length)];
+                          } else {
+                            selected = longTexts[Math.floor(Math.random() * longTexts.length)];
+                          }
+                          updateInputText(selected.content);
+                          setLoadedLongTextInfo({ title: selected.title, source: selected.source, url: selected.url });
+                          const entry = { title: selected.title, source: selected.source, url: selected.url };
+                          const newHistory = [entry, ...longTextHistory].slice(0, 50);
+                          setLongTextHistory(newHistory);
+                          localStorage.setItem('longTextHistory', JSON.stringify(newHistory));
+                        }}
+                      >
+                        🔄
+                      </button>
+                    )}
+                  </div>
+                )}
+                {loadedLongTextInfo && mode === "longtext" && practicingMode !== mode && (
+                  <span className="text-sm text-gray-600">
+                    {loadedLongTextInfo.title} — <span className="text-gray-400">{loadedLongTextInfo.source}</span>
+                  </span>
+                )}
               </div>
 
               {(isPracticing || countdown !== null || isRoundComplete) && (
@@ -3127,11 +3232,11 @@ export default function TypingPractice() {
           )}
 
           {mode !== "sequential" && mode !== "longtext" && mode !== "random" && isPracticing && (
-            <div className="flex items-center">
+            <div className={`flex items-center px-3 py-1.5 rounded ${mode === "sentences" && isSentenceReview ? 'bg-red-50 border border-red-300' : ''}`}>
               <div className="flex flex-col space-y-1">
                 <div className="flex items-center space-x-4 text-sm font-medium">
                   {mode === "sentences" && isSentenceReview && (
-                    <span className="text-red-600">복습: {progressCount}/{totalCount}</span>
+                    <span className="text-red-600">복습: {preReviewSentenceStateRef.current?.progressCount ?? 0}/{preReviewSentenceStateRef.current?.totalCount ?? 0}({progressCount}/{totalCount})</span>
                   )}
                   {mode === "sentences" && !isSentenceReview && (
                     <span className="text-purple-600">진행: {progressCount}/{totalCount}</span>
@@ -4013,9 +4118,26 @@ export default function TypingPractice() {
             <>
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium">
-                  <span className="text-blue-600">정답: {correctCount}</span> |{" "}
-                  <span className="text-rose-600">오답: {incorrectCount}</span> |
-                  진행: {totalCount > 0 ? `${progressCount} / ${totalCount}` : progressCount}
+                  <span className="text-blue-600">정답: {isPracticing ? correctCount : (roundCompleteResult?.correct ?? correctCount)}</span> |{" "}
+                  <span className="text-rose-600">오답: {isPracticing ? incorrectCount : (roundCompleteResult?.incorrect ?? incorrectCount)}</span> |
+                  진행: {(() => {
+                    const effectiveTotal = totalCount > 0 ? totalCount : sentences.length;
+                    if (isPracticing) {
+                      if (isSentenceReview && preReviewSentenceStateRef.current) {
+                        const saved = preReviewSentenceStateRef.current;
+                        const savedTotal = saved.totalCount > 0 ? saved.totalCount : sentences.length;
+                        return `${saved.progressCount}/${savedTotal}(${progressCount}/${effectiveTotal})`;
+                      }
+                      return effectiveTotal > 0 ? `${progressCount}/${effectiveTotal}` : progressCount;
+                    }
+                    if (roundCompleteResult) {
+                      if (roundCompleteResult.reviewTotal != null) {
+                        return `${roundCompleteResult.total}/${roundCompleteResult.total}(${roundCompleteResult.reviewCorrect}/${roundCompleteResult.reviewTotal})`;
+                      }
+                      return `${roundCompleteResult.total}/${roundCompleteResult.total}`;
+                    }
+                    return effectiveTotal > 0 ? `${progressCount}/${effectiveTotal}` : progressCount;
+                  })()}
                   {isSentenceReview && isPracticing && (
                     <> | <span className="font-bold text-purple-600">복습 중</span></>
                   )}
@@ -4382,40 +4504,88 @@ export default function TypingPractice() {
       {showLoginModal && (
         <LoginPage onClose={() => setShowLoginModal(false)} />
       )}
-      {/* 우하단 모드별 완료 현황 토글 */}
-      <div className="fixed bottom-4 right-4 z-50">
-        {showModeStats && (
-          <div className="mb-2 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-sm min-w-[150px]">
-            <div className="font-semibold text-gray-700 mb-2 border-b pb-1">오늘의 완료 현황</div>
-            {([
-              ["sequential", "보고치라"],
-              ["batch", "매매치라"],
-              ["longtext", "긴글"],
-              ["words", "단어"],
-              ["sentences", "문장"],
-              ["position", "자리"],
-            ] as const).map(([key, label]) => (
-              <div key={key} className="flex justify-between items-center py-0.5 gap-3">
-                <span className="text-gray-600">{label}</span>
-                <span className="flex items-center gap-1">
-                  <span className="font-semibold text-gray-800">{modeCompletedRounds[key] || 0}{key === "words" ? "단어" : key === "sentences" ? "문장" : "회"}</span>
-                  <button
-                    onClick={() => resetModeCompletedRounds(key)}
-                    className="text-red-400 hover:text-red-600 text-xs ml-1"
-                    title={`${label} 초기화`}
-                  >✕</button>
-                </span>
+      {/* 우하단 긴글 히스토리 + 모드별 완료 현황 토글 */}
+      <div className="fixed bottom-4 right-4 z-50 flex items-end gap-2">
+        {/* 긴글 히스토리 */}
+        <div>
+          {showLongTextHistory && longTextHistory.length > 0 && (
+            <div className="mb-2 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-sm min-w-[220px] max-h-[300px] overflow-y-auto">
+              <div className="flex justify-between items-center mb-2 border-b pb-1">
+                <span className="font-semibold text-gray-700">긴글 히스토리</span>
+                <button
+                  className="text-xs text-red-400 hover:text-red-600"
+                  onClick={() => {
+                    setLongTextHistory([]);
+                    localStorage.removeItem('longTextHistory');
+                    setShowLongTextHistory(false);
+                  }}
+                >
+                  전체 삭제
+                </button>
               </div>
-            ))}
-          </div>
-        )}
-        <button
-          onClick={() => setShowModeStats(prev => !prev)}
-          className="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg text-lg"
-          title="모드별 완료 현황"
-        >
-          {todayCompletedRounds}
-        </button>
+              {longTextHistory.map((item, i) => (
+                <div key={i} className="py-1 border-b border-gray-100 last:border-0">
+                  <div className="text-xs font-medium text-gray-700">{item.title}</div>
+                  <div className="text-xs text-gray-400">{item.source}</div>
+                  {item.url && (
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-400 hover:text-blue-600 underline break-all"
+                    >
+                      {item.url}
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {longTextHistory.length > 0 && (
+            <button
+              onClick={() => setShowLongTextHistory(prev => !prev)}
+              className="bg-purple-500 hover:bg-purple-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg text-sm"
+              title="긴글 히스토리"
+            >
+              {longTextHistory.length}
+            </button>
+          )}
+        </div>
+        {/* 모드별 완료 현황 */}
+        <div>
+          {showModeStats && (
+            <div className="mb-2 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-sm min-w-[150px]">
+              <div className="font-semibold text-gray-700 mb-2 border-b pb-1">오늘의 완료 현황</div>
+              {([
+                ["sequential", "보고치라"],
+                ["batch", "매매치라"],
+                ["longtext", "긴글"],
+                ["words", "단어"],
+                ["sentences", "문장"],
+                ["position", "자리"],
+              ] as const).map(([key, label]) => (
+                <div key={key} className="flex justify-between items-center py-0.5 gap-3">
+                  <span className="text-gray-600">{label}</span>
+                  <span className="flex items-center gap-1">
+                    <span className="font-semibold text-gray-800">{modeCompletedRounds[key] || 0}{key === "words" ? "단어" : key === "sentences" ? "문장" : "회"}</span>
+                    <button
+                      onClick={() => resetModeCompletedRounds(key)}
+                      className="text-red-400 hover:text-red-600 text-xs ml-1"
+                      title={`${label} 초기화`}
+                    >✕</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setShowModeStats(prev => !prev)}
+            className="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg text-lg"
+            title="모드별 완료 현황"
+          >
+            {todayCompletedRounds}
+          </button>
+        </div>
       </div>
     </div>
   );
