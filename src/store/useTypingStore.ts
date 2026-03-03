@@ -416,55 +416,101 @@ export const useTypingStore = create<TypingState>()(
 
       restartSequentialPractice: () => {
         const state = get();
-        // 湲곗〈 ?띿뒪?몃? ?좎??섎㈃???덈줈???쒕뜡 ?쒖꽌濡??ъ떆??
-        // 湲?湲 紐⑤뱶: ?꾩뼱?곌린 ?좎?, 蹂닿퀬移섎씪 紐⑤뱶: ?꾩뼱?곌린 ?쒓굅
-        const text = state.mode === "longtext"
-          ? state.inputText
-          : state.inputText.replace(/\s+/g, '');
-        const indices = Array.from({ length: text.length }, (_, i) => i);
-        const shuffledIndices = state.mode === "longtext"
-          ? indices  // 湲?湲 紐⑤뱶: ?쒖꽌?濡?
-          : [...indices].sort(() => Math.random() - 0.5);  // 蹂닿퀬移섎씪 紐⑤뱶: ?쒕뜡
+        if (state.mode === "longtext") {
+          // 긴글모드: 문장 단위로 재시작
+          const rawText = state.inputText;
+          const longtextSentences = rawText
+            .split(/(?<=[.!?．。])\s*/)
+            .map((s: string) => s.trim())
+            .filter((s: string) => s.length > 0);
+          const finalSentences = longtextSentences.length <= 1 && rawText.includes('\n')
+            ? rawText.split(/\n+/).map((s: string) => s.trim()).filter((s: string) => s.length > 0)
+            : longtextSentences;
 
-        set({
-          sequentialText: text,
-          displayedCharIndices: new Set<number>(),
-          randomizedIndices: shuffledIndices,
-          currentDisplayIndex: 0,
-          typedWord: "",
-          currentWordStartTime: null,
-          currentWordKeystrokes: 0,
-        });
+          set({
+            sentences: finalSentences,
+            currentSentenceIndex: 0,
+            typedWord: "",
+            lastSentenceTyped: "",
+            correctCount: 0,
+            incorrectCount: 0,
+            incorrectWords: [],
+            totalCount: finalSentences.length,
+            progressCount: 0,
+            currentWordStartTime: null,
+            currentWordKeystrokes: 0,
+          });
+        } else {
+          // 보고치라: 기존 글자 단위 재시작
+          const text = state.inputText.replace(/\s+/g, '');
+          const indices = Array.from({ length: text.length }, (_, i) => i);
+          const shuffledIndices = [...indices].sort(() => Math.random() - 0.5);
+
+          set({
+            sequentialText: text,
+            displayedCharIndices: new Set<number>(),
+            randomizedIndices: shuffledIndices,
+            currentDisplayIndex: 0,
+            typedWord: "",
+            currentWordStartTime: null,
+            currentWordKeystrokes: 0,
+          });
+        }
       },
 
       startPractice: (words) => {
         const state = get();
 
         if (state.mode === "sequential" || state.mode === "longtext") {
-          // 蹂닿퀬移섎씪: ?꾩뼱?곌린 ?쒓굅, 湲?湲: ?꾩뼱?곌린 ?좎?
-          const text = state.mode === "longtext"
-            ? state.inputText
-            : state.inputText.replace(/\s+/g, '');
-          const indices = Array.from({ length: text.length }, (_, i) => i);
-          const finalIndices = state.mode === "longtext"
-            ? indices  // 湲?湲 紐⑤뱶: ?쒖꽌?濡?
-            : [...indices].sort(() => Math.random() - 0.5);  // 蹂닿퀬移섎씪 紐⑤뱶: ?쒕뜡
+          if (state.mode === "longtext") {
+            // 긴글모드: 문장 단위로 분리하여 sentences에 저장
+            const rawText = state.inputText;
+            const longtextSentences = rawText
+              .split(/(?<=[.!?．。])\s*/)
+              .map((s: string) => s.trim())
+              .filter((s: string) => s.length > 0);
+            // 문장 부호로 나눠지지 않는 경우 줄바꿈으로 분리
+            const finalSentences = longtextSentences.length <= 1 && rawText.includes('\n')
+              ? rawText.split(/\n+/).map((s: string) => s.trim()).filter((s: string) => s.length > 0)
+              : longtextSentences;
 
-          set({
-            sequentialText: text,
-            displayedCharIndices: new Set<number>(),
-            randomizedIndices: finalIndices,
-            currentDisplayIndex: 0,
-            isPracticing: true,
-            correctCount: 0,
-            halfCorrectCount: 0,
-            incorrectCount: 0,
-            incorrectWords: [],
-            totalCount: 0,
-            progressCount: 0,
-            currentWordStartTime: null,
-            currentWordKeystrokes: 0,
-          });
+            set({
+              sentences: finalSentences,
+              currentSentenceIndex: 0,
+              isPracticing: true,
+              correctCount: 0,
+              halfCorrectCount: 0,
+              incorrectCount: 0,
+              incorrectWords: [],
+              totalCount: finalSentences.length,
+              progressCount: 0,
+              currentWordStartTime: null,
+              currentWordKeystrokes: 0,
+              typedWord: "",
+              lastSentenceTyped: "",
+            });
+          } else {
+            // 보고치라: 공백제거 후 글자 단위
+            const text = state.inputText.replace(/\s+/g, '');
+            const indices = Array.from({ length: text.length }, (_, i) => i);
+            const finalIndices = [...indices].sort(() => Math.random() - 0.5);
+
+            set({
+              sequentialText: text,
+              displayedCharIndices: new Set<number>(),
+              randomizedIndices: finalIndices,
+              currentDisplayIndex: 0,
+              isPracticing: true,
+              correctCount: 0,
+              halfCorrectCount: 0,
+              incorrectCount: 0,
+              incorrectWords: [],
+              totalCount: 0,
+              progressCount: 0,
+              currentWordStartTime: null,
+              currentWordKeystrokes: 0,
+            });
+          }
         } else {
           // 湲곗〈 紐⑤뱶??
           const allLetters = words.flatMap((word) => word.trim().split(""));
@@ -552,14 +598,14 @@ export const useTypingStore = create<TypingState>()(
           positionEnabledStages,
         } = get();
 
-        const trimmedInput = mode === "sentences"
+        const trimmedInput = (mode === "sentences" || mode === "longtext")
           ? input.trim()
           : removeWhitespace(input);
         const target =
           (mode === "words" || mode === "position")
             ? removeWhitespace(shuffledWords[currentWordIndex] ?? "")
-            : mode === "sentences"
-            ? sentences[currentSentenceIndex].trim()
+            : (mode === "sentences" || mode === "longtext")
+            ? (sentences[currentSentenceIndex] ?? "").trim()
             : randomLetters[currentLetterIndex];
 
         // 단어모드: 3단계 판정 (완숙/반숙/미숙)
@@ -609,7 +655,7 @@ export const useTypingStore = create<TypingState>()(
             shuffledWords: nextShuffledWords,
             currentWordIndex: mode === "words" || mode === "position" ? nextWordIndex : state.currentWordIndex,
             currentSentenceIndex:
-              mode === "sentences"
+              (mode === "sentences" || mode === "longtext")
                 ? isLastItem ? state.currentSentenceIndex : (state.currentSentenceIndex + 1) % Math.max(state.sentences.length, 1)
                 : state.currentSentenceIndex,
             currentLetterIndex:
@@ -617,7 +663,7 @@ export const useTypingStore = create<TypingState>()(
                 ? (state.currentLetterIndex + 1) % Math.max(state.randomLetters.length, 1)
                 : state.currentLetterIndex,
             typedWord: "",
-            lastSentenceTyped: mode === "sentences" ? input.trim() : state.lastSentenceTyped,
+            lastSentenceTyped: (mode === "sentences" || mode === "longtext") ? input.trim() : state.lastSentenceTyped,
             progressCount: nextProgressCount,
             totalCount: nextTotalCount,
           };
