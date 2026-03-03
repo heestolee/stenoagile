@@ -13,7 +13,6 @@ import { useSlotManager } from "../hooks/useSlotManager";
 import { useWordReview } from "../hooks/useWordReview";
 import { useWordProficiency } from "../hooks/useWordProficiency";
 import { useAuth } from "../hooks/useAuth";
-import { longTexts, fromis9Texts } from "../constants/longTexts";
 import LoginPage from "./LoginPage";
 import WordProficiencyPanel from "./WordProficiencyPanel";
 
@@ -291,15 +290,7 @@ export default function TypingPractice() {
     refreshToday, refreshOverall, clearToday, clearOverall, mergeToOverall,
   } = useWordProficiency("words");
   const [showProficiencyPanel, setShowProficiencyPanel] = useState(false);
-  const [longTextClickCount, setLongTextClickCount] = useState(0);
-  const [loadedLongTextInfo, setLoadedLongTextInfo] = useState<{ title: string; source: string; url?: string } | null>(null);
-  const [longTextHistory, setLongTextHistory] = useState<{ title: string; source: string; url?: string }[]>(() => {
-    try {
-      const saved = localStorage.getItem('longTextHistory');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-  const [showLongTextHistory, setShowLongTextHistory] = useState(false);
+  const [longTextLength, setLongTextLength] = useState(300);
   const [reviewFailedWords, setReviewFailedWords] = useState<{ word: string; typed: string }[]>(() => {
     try {
       const saved = localStorage.getItem('reviewFailedWords');
@@ -763,6 +754,16 @@ export default function TypingPractice() {
     incorrectWords: typeof incorrectWords;
     totalCount: number;
   } | null>(null);
+  const savedLongtextStateRef = useRef<{
+    sentences: string[];
+    currentSentenceIndex: number;
+    progressCount: number;
+    correctCount: number;
+    incorrectCount: number;
+    incorrectWords: typeof incorrectWords;
+    totalCount: number;
+    inputText: string;
+  } | null>(null);
   // 문장모드 복습 전 상태 보존 (복습 후 원래 위치로 복귀)
   const preReviewSentenceStateRef = useRef<{
     sentences: string[];
@@ -788,6 +789,7 @@ export default function TypingPractice() {
         if (settings.batchSize !== undefined) setBatchSize(settings.batchSize);
         if (settings.rankFontSize !== undefined) setRankFontSize(settings.rankFontSize);
         if (settings.speechRate !== undefined) useTypingStore.getState().changeSpeechRate(settings.speechRate);
+        if (settings.longTextLength !== undefined) setLongTextLength(settings.longTextLength);
       } catch (e) {
         // 파싱 실패 시 기본값 유지
       }
@@ -1133,7 +1135,13 @@ export default function TypingPractice() {
       setRoundStartTime(Date.now());
       restartSequentialPractice();
       // 타이핑 칸에 포커스
-      setTimeout(() => typingTextareaRef.current?.focus(), 50);
+      setTimeout(() => {
+        if (mode === "longtext") {
+          wordInputRef.current?.focus();
+        } else {
+          typingTextareaRef.current?.focus();
+        }
+      }, 50);
     });
   };
 
@@ -1235,7 +1243,7 @@ export default function TypingPractice() {
     const autoSubmitTarget =
       isReviewActive && currentReviewTarget
         ? currentReviewTarget.trim()
-        : mode === "sentences" && isPracticing && sentences[currentSentenceIndex]
+        : (mode === "sentences" || mode === "longtext") && isPracticing && sentences[currentSentenceIndex]
           ? sentences[currentSentenceIndex].trim()
           : isWordLikeMode && isPracticing && shuffledWords[currentWordIndex]
             ? shuffledWords[currentWordIndex].trim()
@@ -1280,9 +1288,17 @@ export default function TypingPractice() {
           ? inputClean.endsWith(targetClean) && targetClean.length > 0
           : value.trim() === autoSubmitTarget;
         submitAnswer(value);
-        // 문장모드: 문장 하나 제출할 때마다 즉시 완료 카운트 +1
-        if (mode === "sentences") {
+        // 문장모드/긴글모드: 문장 하나 제출할 때마다 즉시 완료 카운트 +1
+        if (mode === "sentences" || mode === "longtext") {
           incrementCompletedRounds(practiceSlot, mode, 1);
+          // 긴글모드: 마지막 문장이면 라운드 완료 처리
+          if (mode === "longtext" && progressCount + 1 >= totalCount && totalCount > 0) {
+            setIsRoundComplete(true);
+            setIsDrawerOpen(true);
+            if (practiceSlot !== null) {
+              incrementCompletedRounds(practiceSlot, mode);
+            }
+          }
         }
         if (isPositionMode) {
           const fromChar = currentWordIndex > 0 ? shuffledWords[currentWordIndex - 1] : "";
@@ -1360,7 +1376,7 @@ export default function TypingPractice() {
               if (mode === "longtext") {
                 setRoundStartTime(Date.now());
                 startPractice(words);
-                setTimeout(() => typingTextareaRef.current?.focus(), 50);
+                setTimeout(() => wordInputRef.current?.focus(), 50);
               } else if (mode === "sequential" || mode === "random") {
                 startCountdown(() => {
                   setRoundStartTime(Date.now());
@@ -1377,8 +1393,16 @@ export default function TypingPractice() {
         return;
       }
 
-      // 보고치라/긴글/랜덤 모드에서는 다른 처리
-      if ((mode === "sequential" || mode === "longtext" || mode === "random") && isPracticing) {
+      // 긴글모드: 문장 단위 자동제출 방식 - 엔터로 5글자 미만 무시
+      if (mode === "longtext" && isPracticing) {
+        if (typedWord.trim().length < 5) {
+          event.preventDefault();
+          return;
+        }
+      }
+
+      // 보고치라/랜덤 모드에서는 다른 처리
+      if ((mode === "sequential" || mode === "random") && isPracticing) {
         event.preventDefault();
 
         // 라운드 완료/일시정지 상태에서 엔터 처리
@@ -1411,15 +1435,7 @@ export default function TypingPractice() {
             }
             return;
           }
-          // 긴글 모드
-          if (mode === "longtext") {
-            if (isFullyComplete) {
-              startNextRound();
-            } else {
-              resumeRound();
-            }
-            return;
-          }
+          // 긴글 모드는 문장 단위 자동제출 사용
           // 랜덤 모드
           if (mode === "random") {
             if (isFullyComplete) {
@@ -1553,8 +1569,8 @@ export default function TypingPractice() {
     // 제외된 키가 아니면 타수 증가 (Backspace, Delete, Space 포함)
     // IME 조합 중 keyCode 229 이벤트는 중복 카운트 방지
     if (!excludedKeys.includes(event.key) && !isIMEComposing) {
-      // 보고치라/긴글/랜덤 모드에서 라운드 완료 상태일 때 타이핑 시작하면 자동으로 재개
-      if ((mode === "sequential" || mode === "longtext" || mode === "random") && isRoundComplete) {
+      // 보고치라/랜덤 모드에서 라운드 완료 상태일 때 타이핑 시작하면 자동으로 재개
+      if ((mode === "sequential" || mode === "random") && isRoundComplete) {
         setIsRoundComplete(false);
       }
 
@@ -1698,7 +1714,6 @@ export default function TypingPractice() {
       stopPractice();
       resetReview();
       setPracticingMode(null);
-      setLoadedLongTextInfo(null);
       // 드로어 열기
       setIsDrawerOpen(true);
       // 타이핑칸에 포커스
@@ -1766,6 +1781,7 @@ export default function TypingPractice() {
       batchSize,
       rankFontSize,
       speechRate,
+      longTextLength,
     };
     localStorage.setItem('detailSettings', JSON.stringify(settings));
     alert('상세설정이 기본값으로 저장되었습니다');
@@ -1805,7 +1821,16 @@ export default function TypingPractice() {
   useEffect(() => {
     if (!isPracticing) return;
 
-    if (mode === "sequential" || mode === "longtext" || mode === "random") {
+    if (mode === "longtext") {
+      // 긴글모드: 문장 단위 자동제출 방식, 순차 표시 불필요
+      // 음성 재생만 처리
+      if (isSoundEnabled && sentences[currentSentenceIndex]) {
+        speakText(sentences[currentSentenceIndex]);
+      }
+      return;
+    }
+
+    if (mode === "sequential" || mode === "random") {
       // 라운드 완료 상태면 글자 표시 멈춤
       if (isRoundComplete) return;
 
@@ -2175,6 +2200,22 @@ export default function TypingPractice() {
     }
   };
 
+  // 긴글모드 상태 저장 (다른 모드로 전환 시)
+  const saveLongtextState = () => {
+    if (mode === "longtext" && sentences.length > 0) {
+      savedLongtextStateRef.current = {
+        sentences: [...sentences],
+        currentSentenceIndex,
+        progressCount,
+        correctCount,
+        incorrectCount,
+        incorrectWords: [...incorrectWords],
+        totalCount: totalCount > 0 ? totalCount : sentences.length,
+        inputText,
+      };
+    }
+  };
+
 
   // 배치/복습 상태 초기화
   const resetBatchAndReviewState = () => {
@@ -2197,6 +2238,7 @@ export default function TypingPractice() {
     setPreReviewResults([]);
     setIsRoundComplete(false);
     stopPractice();
+    setSentences([]);
     resetReview();
     resetBatchAndReviewState();
     setCountdown(null);
@@ -2223,6 +2265,24 @@ export default function TypingPractice() {
     }
   };
 
+  // 긴글모드 상태 복원 (긴글모드로 돌아올 때)
+  const restoreLongtextState = () => {
+    const saved = savedLongtextStateRef.current;
+    if (saved) {
+      updateInputText(saved.inputText);
+      setPracticingMode("longtext");
+      resumeSentencePractice({
+        sentences: saved.sentences,
+        currentSentenceIndex: saved.currentSentenceIndex,
+        progressCount: saved.progressCount,
+        correctCount: saved.correctCount,
+        incorrectCount: saved.incorrectCount,
+        incorrectWords: saved.incorrectWords,
+        totalCount: saved.totalCount > 0 ? saved.totalCount : saved.sentences.length,
+      });
+    }
+  };
+
   return (
     <div className="p-4 w-full">
       <div className="flex items-center gap-4 mb-4">
@@ -2234,6 +2294,7 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
+              saveLongtextState();
               cleanupForModeSwitch();
               switchMode("position");
             }}
@@ -2246,6 +2307,7 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
+              saveLongtextState();
               cleanupForModeSwitch();
               switchMode("words");
             }}
@@ -2257,6 +2319,7 @@ export default function TypingPractice() {
               mode === "sentences" ? "bg-blue-500 text-white" : "bg-gray-300"
             }`}
             onClick={() => {
+              saveLongtextState();
               cleanupForModeSwitch();
               switchMode("sentences");
               restoreSentenceState();
@@ -2270,8 +2333,10 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
+              saveLongtextState();
               cleanupForModeSwitch();
               switchMode("longtext");
+              restoreLongtextState();
             }}
           >
             긴 글
@@ -2282,6 +2347,7 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
+              saveLongtextState();
               if (!isBatchMode || mode !== "sequential") {
                 cleanupForModeSwitch();
               }
@@ -2297,6 +2363,7 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
+              saveLongtextState();
               if (isBatchMode || mode !== "sequential") {
                 cleanupForModeSwitch();
               }
@@ -2312,6 +2379,7 @@ export default function TypingPractice() {
             }`}
             onClick={() => {
               saveSentenceState();
+              saveLongtextState();
               cleanupForModeSwitch();
               switchMode("random");
             }}
@@ -2659,6 +2727,26 @@ export default function TypingPractice() {
                     />
                     <span className="text-xs text-gray-500">자</span>
                   </div>
+                  {mode === "longtext" && (
+                    <div className="flex items-center gap-1">
+                      <label className="text-xs whitespace-nowrap">긴글길이</label>
+                      <input
+                        type="number"
+                        min={100}
+                        max={2000}
+                        step={50}
+                        value={longTextLength}
+                        onChange={(e) => {
+                          const len = parseInt(e.target.value);
+                          if (!isNaN(len) && len >= 100 && len <= 2000) {
+                            setLongTextLength(len);
+                          }
+                        }}
+                        className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-gray-500">자</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-1">
                     <label className="text-xs whitespace-nowrap">매매 치라</label>
                     <input
@@ -3091,85 +3179,6 @@ export default function TypingPractice() {
                 >
                   {countdown !== null ? `${countdown}초` : practicingMode === mode ? "연습 종료" : "연습 시작"}
                 </button>
-                {mode === "longtext" && practicingMode !== mode && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      className={`px-4 py-2 rounded font-semibold transition ${
-                        countdown !== null
-                          ? "bg-purple-300 text-white cursor-not-allowed"
-                          : loadedLongTextInfo
-                            ? "bg-green-500 text-white hover:bg-green-600"
-                            : "bg-purple-500 text-white hover:bg-purple-600"
-                      }`}
-                      disabled={countdown !== null}
-                      onClick={() => {
-                        if (!loadedLongTextInfo) {
-                          // 첫 클릭: 글 뽑기만
-                          const nextCount = longTextClickCount + 1;
-                          setLongTextClickCount(nextCount);
-                          let selected: (typeof longTexts)[number];
-                          if (nextCount % 5 === 0) {
-                            selected = fromis9Texts[Math.floor(Math.random() * fromis9Texts.length)];
-                          } else {
-                            selected = longTexts[Math.floor(Math.random() * longTexts.length)];
-                          }
-                          updateInputText(selected.content);
-                          setLoadedLongTextInfo({ title: selected.title, source: selected.source, url: selected.url });
-                          const entry = { title: selected.title, source: selected.source, url: selected.url };
-                          const newHistory = [entry, ...longTextHistory].slice(0, 50);
-                          setLongTextHistory(newHistory);
-                          localStorage.setItem('longTextHistory', JSON.stringify(newHistory));
-                        } else {
-                          // 두 번째 클릭 (드가자): 연습 시작
-                          const words = inputText.trim().split("/").filter(Boolean);
-                          if (words.length > 0) {
-                            setRoundCompleteResult(null);
-                            resetBatchAndReviewState();
-                            setPracticeSlot(selectedSlot);
-                            setPracticingMode("longtext");
-                            setIsDrawerOpen(false);
-                            startCountdown(() => {
-                              setRoundStartTime(Date.now());
-                              startPractice(words);
-                              setTimeout(() => typingTextareaRef.current?.focus(), 50);
-                            });
-                          }
-                        }
-                      }}
-                    >
-                      {countdown !== null ? "드가자" : loadedLongTextInfo ? "드가자" : "랜덤 긴글"}
-                    </button>
-                    {countdown === null && (
-                      <button
-                        className="p-2 rounded transition bg-purple-100 text-purple-600 hover:bg-purple-200 text-sm"
-                        title="다시뽑기"
-                        onClick={() => {
-                          const nextCount = longTextClickCount + 1;
-                          setLongTextClickCount(nextCount);
-                          let selected: (typeof longTexts)[number];
-                          if (nextCount % 5 === 0) {
-                            selected = fromis9Texts[Math.floor(Math.random() * fromis9Texts.length)];
-                          } else {
-                            selected = longTexts[Math.floor(Math.random() * longTexts.length)];
-                          }
-                          updateInputText(selected.content);
-                          setLoadedLongTextInfo({ title: selected.title, source: selected.source, url: selected.url });
-                          const entry = { title: selected.title, source: selected.source, url: selected.url };
-                          const newHistory = [entry, ...longTextHistory].slice(0, 50);
-                          setLongTextHistory(newHistory);
-                          localStorage.setItem('longTextHistory', JSON.stringify(newHistory));
-                        }}
-                      >
-                        🔄
-                      </button>
-                    )}
-                  </div>
-                )}
-                {loadedLongTextInfo && mode === "longtext" && practicingMode !== mode && (
-                  <span className="text-sm text-gray-600">
-                    {loadedLongTextInfo.title} — <span className="text-gray-400">{loadedLongTextInfo.source}</span>
-                  </span>
-                )}
               </div>
 
               {(isPracticing || countdown !== null || isRoundComplete) && (
@@ -3196,6 +3205,13 @@ export default function TypingPractice() {
                           {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`} ({isBatchMode ? '매매치라' : '보고치라'}) : {((isBatchMode ? slotCompletedRoundsBatch[practiceSlot] : slotCompletedRoundsNormal[practiceSlot]) || 0) + 1}회 완료
                         </span>
                       )}
+                    </>
+                  ) : mode === "longtext" ? (
+                    <>
+                      <span className="text-purple-600 font-semibold">진행: {progressCount}/{totalCount}</span>
+                      <span className="text-blue-600 font-semibold">타수: {lastResult.kpm}/분</span>
+                      <span className="text-green-600 font-semibold">자수: {lastResult.cpm}/분</span>
+                      <span ref={elapsedTimerRef} className="text-orange-600 font-semibold">시간: {formatTime(displayElapsedTime)}</span>
                     </>
                   ) : (
                     <>
@@ -3255,7 +3271,239 @@ export default function TypingPractice() {
             </div>
           )}
 
-          {showText && (mode === "sequential" || mode === "longtext") && (
+          {showText && mode === "longtext" && (
+            <div className="flex flex-col gap-2">
+              {/* 문제칸 */}
+              <div
+                ref={displayAreaRef}
+                className={`p-4 border rounded bg-gray-50 relative ${countdown !== null ? 'flex flex-col items-center justify-center' : ''}`}
+              >
+                {countdown !== null ? (
+                  <>
+                    {practiceSlot !== null && (
+                      <p className="text-2xl font-bold text-gray-700 mb-4">
+                        {slotNames[practiceSlot] || `슬롯 ${practiceSlot}`}
+                      </p>
+                    )}
+                    <p className="text-8xl font-bold text-blue-600 animate-pulse">
+                      {countdown}
+                    </p>
+                  </>
+                ) : (practicingMode !== "longtext" && practicingMode !== null) || !isPracticing ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-center py-4 text-gray-400 text-lg">
+                      연습 시작을 눌러주세요
+                    </div>
+                    <input
+                      ref={wordInputRef}
+                      autoComplete="off"
+                      type="text"
+                      className="w-full p-2 border rounded"
+                      style={{ fontSize: `${displayFontSize}px` }}
+                      placeholder="Tab 키로 연습 칸으로 이동"
+                      disabled
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {/* 완료된 직전 문장: 원문 (파랑/빨강 비교) + 사용자 입력 (회색) */}
+                    {lastSentenceTyped && sentences.length > 0 && (() => {
+                      const prevIdx = isRoundComplete
+                        ? currentSentenceIndex
+                        : currentSentenceIndex - 1;
+                      const prevSentence = prevIdx >= 0 ? sentences[prevIdx] : null;
+                      if (!prevSentence) return null;
+                      return (
+                        <div className="flex flex-col gap-0.5">
+                          <p className="font-semibold whitespace-nowrap overflow-hidden" style={{ fontSize: `${displayFontSize}px`, lineHeight: 1.4 }}>
+                            {prevSentence.split("").map((char, i) => {
+                              const typedChar = lastSentenceTyped[i];
+                              if (typedChar === undefined) {
+                                return <span key={i}>{char}</span>;
+                              }
+                              if (typedChar === char) {
+                                return <span key={i} style={{ color: "blue" }}>{char}</span>;
+                              }
+                              return <span key={i} style={{ color: "red" }}>{char}</span>;
+                            })}
+                          </p>
+                          <p className="whitespace-nowrap overflow-hidden text-gray-500" style={{ fontSize: `${displayFontSize}px`, lineHeight: 1.4 }}>
+                            {lastSentenceTyped}
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {/* 라운드 완료 시 */}
+                    {isRoundComplete && (
+                      <div className="flex flex-col items-center gap-3 py-4">
+                        <p className="text-xl font-bold text-green-600">라운드 완료!</p>
+                        <p className="text-gray-600 text-sm">
+                          정답: {correctCount} | 오답: {incorrectCount} | 전체: {totalCount}문장
+                        </p>
+                        <button
+                          className="px-6 py-2 bg-blue-500 text-white rounded font-semibold hover:bg-blue-600"
+                          onClick={() => startNextRound()}
+                        >
+                          다시하기
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 현재 문장 (문제) - 한줄 */}
+                    {!isRoundComplete && (
+                      <p className="font-bold whitespace-nowrap overflow-hidden" style={{ fontSize: `${displayFontSize}px`, lineHeight: 1.4 }}>
+                        {(() => {
+                          const target = sentences[currentSentenceIndex] || "";
+                          const composing = isComposingRef.current;
+                          const confirmedLen = composing && typedWord.length > 0
+                            ? typedWord.length - 1
+                            : typedWord.length;
+                          return target.split("").map((char, i) => {
+                            let style: React.CSSProperties = {};
+                            let displayChar = char;
+                            if (i < confirmedLen) {
+                              if (typedWord[i] === char) {
+                                style = { color: "blue" };
+                              } else {
+                                if (char === " ") {
+                                  displayChar = "\u2228";
+                                  style = { color: "red", fontSize: "0.8em" };
+                                } else {
+                                  style = { color: "red", textDecoration: "underline" };
+                                }
+                              }
+                            } else if (i === confirmedLen && composing) {
+                              style = { color: "#9CA3AF" };
+                            }
+                            return <span key={i} style={style}>{displayChar}</span>;
+                          });
+                        })()}
+                      </p>
+                    )}
+
+                    {/* 입력칸 - 항상 표시 */}
+                    <input
+                      ref={wordInputRef}
+                      key={`longtext-${currentSentenceIndex}`}
+                      autoFocus
+                      autoComplete="off"
+                      type="text"
+                      className="w-full p-2 border rounded"
+                      style={{ fontSize: `${displayFontSize}px` }}
+                      placeholder="Tab 키로 연습 칸으로 이동"
+                      onChange={handleInputChange}
+                      onKeyDown={(e) => {
+                        if (e.key === "Tab") {
+                          e.preventDefault();
+                          practiceInputRef.current?.focus();
+                          return;
+                        }
+                        handleKeyDown(e);
+                      }}
+                      onCompositionStart={handleCompositionStart}
+                      onCompositionEnd={handleCompositionEnd}
+                    />
+
+                    {/* 다음 문장 미리보기 */}
+                    {!isRoundComplete && (
+                      <div className="flex flex-col gap-0.5">
+                        {[1, 2, 3, 4].map(offset => {
+                          const idx = currentSentenceIndex + offset;
+                          return (
+                            <span key={offset} className="text-gray-400 whitespace-nowrap overflow-hidden" style={{ fontSize: `${Math.round(displayFontSize * 0.85)}px`, lineHeight: 1.4 }}>
+                              {idx < sentences.length && sentences[idx] ? sentences[idx] : "\u00A0"}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 연습 칸 */}
+              <div className="border rounded p-3 bg-gray-50">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-gray-600 text-base">연습 칸</span>
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <span>{practiceText.length}자</span>
+                    {practiceText.length > 0 && (
+                      <button
+                        className="px-2 py-0.5 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-xs"
+                        onClick={() => { setPracticeText(""); if (practiceInputRef.current) practiceInputRef.current.value = ""; }}
+                      >
+                        지우기
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <textarea
+                  ref={practiceInputRef}
+                  className="w-full p-2 border rounded resize-none"
+                  rows={3}
+                  placeholder="Tab 키로 이동하여 자유롭게 연습..."
+                  value={practiceText}
+                  onChange={(e) => setPracticeText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Tab") {
+                      e.preventDefault();
+                      setPracticeText("");
+                      wordInputRef.current?.focus();
+                    }
+                  }}
+                />
+              </div>
+
+              {/* 최고타/최저타 + 초기화 */}
+              {(() => {
+                const longtextResults = modeResults.filter(r => r.mode === "longtext");
+                const sorted = [...longtextResults].sort((a, b) => b.kpm - a.kpm);
+                const top5 = sorted.slice(0, 5);
+                const bottom5 = sorted.slice(-5).reverse();
+                return (
+                  <div className="grid grid-cols-1 gap-2 text-sm">
+                    <button
+                      className="ml-auto px-3 py-1 text-xs font-semibold text-red-500 bg-red-50 border border-red-300 rounded hover:bg-red-100 active:bg-red-200 transition-colors"
+                      onClick={() => {
+                        setAllResults(prev => prev.filter(r => r.mode !== "longtext"));
+                      }}
+                    >
+                      초기화
+                    </button>
+                    <div className="border rounded p-3 bg-blue-50">
+                      <div className="font-bold text-blue-600 mb-1 text-base">최고타</div>
+                      {[0, 1, 2, 3, 4].map(i => (
+                        <div key={i} className="py-0.5">
+                          {top5[i] ? (
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-gray-700 whitespace-nowrap"><span className="font-semibold">{top5[i].kpm}</span><span className="text-gray-500">타</span> <span className="font-semibold">{top5[i].cpm}</span><span className="text-gray-500">자</span></span>
+                              <span className="text-gray-400 break-all" style={{ fontSize: `${rankFontSize}px` }}>{top5[i].chars}</span>
+                            </div>
+                          ) : <span className="text-gray-300">-</span>}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border rounded p-3 bg-rose-50">
+                      <div className="font-bold text-rose-600 mb-1 text-base">최저타</div>
+                      {[0, 1, 2, 3, 4].map(i => (
+                        <div key={i} className="py-0.5">
+                          {bottom5[i] ? (
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-gray-700 whitespace-nowrap"><span className="font-semibold">{bottom5[i].kpm}</span><span className="text-gray-500">타</span> <span className="font-semibold">{bottom5[i].cpm}</span><span className="text-gray-500">자</span></span>
+                              <span className="text-gray-400 break-all" style={{ fontSize: `${rankFontSize}px` }}>{bottom5[i].chars}</span>
+                            </div>
+                          ) : <span className="text-gray-300">-</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {showText && mode === "sequential" && (
             <div className="flex-1 flex flex-col gap-4">
               <div
                 ref={displayAreaRef}
@@ -3271,7 +3519,7 @@ export default function TypingPractice() {
                     <p className="text-8xl font-bold text-blue-600 animate-pulse">
                       {countdown}
                     </p>
-                    {mode !== "longtext" && (
+                    {(
                     <div className="mt-6 flex flex-col items-center gap-2 max-w-3xl">
                       <div className="text-xs text-gray-500">
                         <span className="text-green-700 font-bold">보고</span>
@@ -4013,7 +4261,7 @@ export default function TypingPractice() {
                   })}
                 </div>
               )}
-              {mode === "sentences" && currentSentenceIndex > 0 && sentences[currentSentenceIndex - 1] && lastSentenceTyped && (
+              {mode === "sentences" && practicingMode === "sentences" && currentSentenceIndex > 0 && sentences[currentSentenceIndex - 1] && lastSentenceTyped && (
                 <div className="flex flex-col items-start gap-1 mb-3">
                   <p className="font-bold whitespace-pre-wrap" style={{ fontSize: `${displayFontSize}px` }}>
                     {sentences[currentSentenceIndex - 1].split("").map((char, i) => {
@@ -4506,51 +4754,6 @@ export default function TypingPractice() {
       )}
       {/* 우하단 긴글 히스토리 + 모드별 완료 현황 토글 */}
       <div className="fixed bottom-4 right-4 z-50 flex items-end gap-2">
-        {/* 긴글 히스토리 */}
-        <div>
-          {showLongTextHistory && longTextHistory.length > 0 && (
-            <div className="mb-2 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-sm min-w-[220px] max-h-[300px] overflow-y-auto">
-              <div className="flex justify-between items-center mb-2 border-b pb-1">
-                <span className="font-semibold text-gray-700">긴글 히스토리</span>
-                <button
-                  className="text-xs text-red-400 hover:text-red-600"
-                  onClick={() => {
-                    setLongTextHistory([]);
-                    localStorage.removeItem('longTextHistory');
-                    setShowLongTextHistory(false);
-                  }}
-                >
-                  전체 삭제
-                </button>
-              </div>
-              {longTextHistory.map((item, i) => (
-                <div key={i} className="py-1 border-b border-gray-100 last:border-0">
-                  <div className="text-xs font-medium text-gray-700">{item.title}</div>
-                  <div className="text-xs text-gray-400">{item.source}</div>
-                  {item.url && (
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-blue-400 hover:text-blue-600 underline break-all"
-                    >
-                      {item.url}
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {longTextHistory.length > 0 && (
-            <button
-              onClick={() => setShowLongTextHistory(prev => !prev)}
-              className="bg-purple-500 hover:bg-purple-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg text-sm"
-              title="긴글 히스토리"
-            >
-              {longTextHistory.length}
-            </button>
-          )}
-        </div>
         {/* 모드별 완료 현황 */}
         <div>
           {showModeStats && (

@@ -52,6 +52,68 @@
 - 배치 진행 중(1/n~n/n) + 복습 중(1/5~4/5) → 재개
 - 복습 5/5 완료 → 다음 라운드
 
+## 다음 작업: 긴글모드 Gemini 랜덤 생성
+
+### 개요
+긴글모드에서 "랜덤 생성" 버튼 → 랜덤 키워드 선택 → Gemini API로 긴글 생성 → 연습
+문장모드의 Gemini 생성 방식(모델 폴백, SSE 스트리밍, AbortController, 에러 처리)을 그대로 적용
+
+### 이전 작업 완료 (삭제됨)
+- RSS/위키백과/수집스크립트 관련 코드 전부 삭제 완료
+- `scripts/`, `src/constants/longTexts.ts`, `src/utils/customLongTexts.ts` 삭제됨
+- TypingPractice.tsx에서 랜덤긴글 관련 state/UI/import 전부 삭제됨
+- `longTextLength` 설정만 유지됨
+
+### 1. 서버 (`src/server/claudePlugin.ts`)
+- `/api/generate-longtext` 엔드포인트 추가
+- 기존 `tryGeminiModel` + 모델 폴백 루프 재활용
+- 요청: `{ keyword, length, apiKey, preferredModel }`
+- 프롬프트: "{keyword}" 주제로 {length}자 내외 한국어 글 (뉴스/논설문/보도자료/연설문/판결문/회의록 중 랜덤 문체)
+- 응답 SSE: `{"chunk":"텍스트"}` → `{"done":true,"totalLength":N}`
+- `extractSentences()` 불필요 (순수 텍스트), 청크 그대로 전달
+- `thinkingBudget: 0` (속도 우선)
+
+### 2. 클라이언트 유틸 (`src/utils/generateLongTextAI.ts`)
+- 새 파일, `generateSentencesStream`과 같은 구조
+- `generateLongTextStream(keyword, length, apiKey, onChunk, onDone, onError, onModel, signal, preferredModel)`
+- `/api/generate-longtext` POST → SSE 파싱
+
+### 3. 키워드 풀 (`src/constants/longTextKeywords.ts`)
+- 새 파일, 카테고리별 키워드 배열
+- 12개 카테고리 (정치/경제/사회/과학IT/문화/법률/의료/환경/국제/스포츠/역사/교육)
+- 카테고리당 8~15개, 총 100~150개
+
+### 4. UI (`src/components/TypingPractice.tsx`)
+- state 추가: `isGeneratingLongText`, `generatingKeyword`, `generatedLongText`, `generateLongTextAbortRef`
+- "연습 시작" 옆에 "랜덤 생성" 버튼 (긴글모드만)
+- 클릭 → 랜덤 키워드 → Gemini API → 텍스트를 입력칸에 세팅
+- 생성 중: "생성 중... (키워드)" + 클릭하면 중단 (AbortController)
+- 에러: `useAIGeneration`의 `getErrorMessage`/`setGenerateErrorWithRetry` 재활용
+- 모델 표시: `[gemini-3-flash]` 작은 텍스트
+- `longTextLength`를 생성 길이로 전달
+
+### 문장모드에서 가져올 패턴
+- 모델 폴백 (7개 모델 순차 시도)
+- SSE 스트리밍 (청크 단위 UI 갱신)
+- AbortController (생성 중 중단)
+- 에러 처리 (한글 에러 + RPM 카운트다운)
+- API 호출 카운트 (incrementApiCallCount)
+- 모델 선택 UI (auto/gemini-3-flash/...)
+- thinking 비활성화 (thinkingBudget: 0)
+
+### 파일 변경 목록
+| 파일 | 작업 |
+|------|------|
+| `src/server/claudePlugin.ts` | `/api/generate-longtext` 엔드포인트 추가 |
+| `src/utils/generateLongTextAI.ts` | 새 파일 — API 호출 + SSE 파싱 |
+| `src/constants/longTextKeywords.ts` | 새 파일 — 키워드 풀 |
+| `src/components/TypingPractice.tsx` | state 4개 + 랜덤 생성 버튼 + 로딩/에러 UI |
+
+### 영향 범위
+- 긴글모드(`mode === "longtext"`) 안에서만 동작, 다른 모드 영향 없음
+
+---
+
 ## 자체 검증 체크리스트
 작업 완료 전 반드시 확인:
 1. 변경한 파일을 다시 읽어서 의도대로 수정됐는지 확인
