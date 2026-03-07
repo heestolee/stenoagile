@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { claudePlugin } from "./src/server/claudePlugin";
+import { claudePlugin } from "./src/modes/sentences/server/claudePlugin";
 
 // https://vite.dev/config/
 export default defineConfig({
