@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 
 export function useSlotManager(inputText: string) {
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [slotNames, setSlotNames] = useState<{ [key: number]: string }>({});
   const [favoriteSlots, setFavoriteSlots] = useState<Set<number>>(new Set());
 
-  // 오늘 완료한 라운드 수
+  // ?ㅻ뒛 ?꾨즺???쇱슫????
   const [todayCompletedRounds, setTodayCompletedRounds] = useState(0);
   const [slotCompletedRoundsNormal, setSlotCompletedRoundsNormal] = useState<Record<number, number>>({});
   const [slotCompletedRoundsBatch, setSlotCompletedRoundsBatch] = useState<Record<number, number>>({});
@@ -13,7 +13,7 @@ export function useSlotManager(inputText: string) {
   const [practiceSlot, setPracticeSlot] = useState<number | null>(null);
   const [pendingIncrementSlot, setPendingIncrementSlot] = useState<number | null>(null);
 
-  // 슬롯 이름 불러오기 및 현재 텍스트와 일치하는 슬롯 찾기
+  // ?щ’ ?대쫫 遺덈윭?ㅺ린 諛??꾩옱 ?띿뒪?몄? ?쇱튂?섎뒗 ?щ’ 李얘린
   useEffect(() => {
     const savedNames: { [key: number]: string } = {};
     for (let i = 1; i <= 20; i++) {
@@ -24,18 +24,18 @@ export function useSlotManager(inputText: string) {
     }
     setSlotNames(savedNames);
 
-    // 즐겨찾기 슬롯 불러오기
+    // 利먭꺼李얘린 ?щ’ 遺덈윭?ㅺ린
     const savedFavorites = localStorage.getItem("favorite_slots");
     if (savedFavorites) {
       try {
         const parsed = JSON.parse(savedFavorites);
         setFavoriteSlots(new Set(parsed));
       } catch {
-        // 파싱 실패 시 무시
+        // ?뚯떛 ?ㅽ뙣 ??臾댁떆
       }
     }
 
-    // 현재 inputText와 일치하는 슬롯 찾기
+    // ?꾩옱 inputText? ?쇱튂?섎뒗 ?щ’ 李얘린
     for (let i = 1; i <= 20; i++) {
       const slotContent = localStorage.getItem(`slot_${i}`);
       if (slotContent && slotContent === inputText) {
@@ -43,9 +43,9 @@ export function useSlotManager(inputText: string) {
         break;
       }
     }
-  }, []);
+  }, [inputText]);
 
-  // 오늘 완료한 라운드 수 불러오기
+  // ?ㅻ뒛 ?꾨즺???쇱슫????遺덈윭?ㅺ린
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     const savedData = localStorage.getItem('completedRounds');
@@ -68,17 +68,17 @@ export function useSlotManager(inputText: string) {
     }
   }, []);
 
-  // 라운드 완료 카운트 증가
+  // ?쇱슫???꾨즺 移댁슫??利앷?
   const incrementCompletedRounds = useCallback((slot: number | null, modeKey: string, amount = 1) => {
     setTodayCompletedRounds(prev => prev + amount);
 
-    // 모드별 카운트 증가
+    // 紐⑤뱶蹂?移댁슫??利앷?
     setModeCompletedRounds(prev => ({
       ...prev,
       [modeKey]: (prev[modeKey] || 0) + amount,
     }));
 
-    // 슬롯별 카운트 (보고치라/매매치라만)
+    // ?щ’蹂?移댁슫??(蹂닿퀬移섎씪/留ㅻℓ移섎씪留?
     const isBatch = modeKey === "batch";
     if (slot !== null && (modeKey === "sequential" || modeKey === "batch")) {
       if (isBatch) {
@@ -97,15 +97,15 @@ export function useSlotManager(inputText: string) {
     }
   }, []);
 
-  // 특정 모드의 완료 횟수 초기화
+  // ?뱀젙 紐⑤뱶???꾨즺 ?잛닔 珥덇린??
   const resetModeCompletedRounds = useCallback((modeKey: string) => {
     setModeCompletedRounds(prev => {
       const removed = prev[modeKey] || 0;
       const next = { ...prev };
       delete next[modeKey];
-      // todayCompletedRounds도 해당 모드 횟수만큼 감소
+      // todayCompletedRounds???대떦 紐⑤뱶 ?잛닔留뚰겮 媛먯냼
       setTodayCompletedRounds(prevTotal => Math.max(0, prevTotal - removed));
-      // 보고치라/매매치라면 슬롯별 카운트도 초기화
+      // 蹂닿퀬移섎씪/留ㅻℓ移섎씪硫??щ’蹂?移댁슫?몃룄 珥덇린??
       if (modeKey === "sequential") {
         setSlotCompletedRoundsNormal({});
       } else if (modeKey === "batch") {
@@ -115,7 +115,7 @@ export function useSlotManager(inputText: string) {
     });
   }, []);
 
-  // localStorage에 완료 횟수 저장 (상태 변경 시)
+  // localStorage???꾨즺 ?잛닔 ???(?곹깭 蹂寃???
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     if (todayCompletedRounds > 0 || Object.keys(slotCompletedRoundsNormal).length > 0 || Object.keys(slotCompletedRoundsBatch).length > 0) {
@@ -131,7 +131,7 @@ export function useSlotManager(inputText: string) {
 
   const handleRenameSlot = (slot: number) => {
     const currentName = slotNames[slot] || `${slot}`;
-    const newName = prompt(`슬롯 ${slot}의 이름을 입력하세요 (최대 7글자):`, currentName);
+    const newName = prompt(`?щ’ ${slot}???대쫫???낅젰?섏꽭??(理쒕? 7湲??:`, currentName);
 
     if (newName !== null && newName.trim() !== "") {
       const trimmed = newName.trim().slice(0, 7);
@@ -155,12 +155,12 @@ export function useSlotManager(inputText: string) {
 
   const handleSaveToSlot = () => {
     if (selectedSlot === null) {
-      alert("저장할 슬롯을 선택하세요");
+      alert("저장할 슬롯을 선택하세요.");
       return;
     }
     localStorage.setItem(`slot_${selectedSlot}`, inputText);
-    const name = slotNames[selectedSlot] || `슬롯 ${selectedSlot}`;
-    alert(`${name}에 저장되었습니다`);
+    const name = slotNames[selectedSlot] || `?щ’ ${selectedSlot}`;
+    alert(`${name}????λ릺?덉뒿?덈떎`);
   };
 
   return {
@@ -183,3 +183,6 @@ export function useSlotManager(inputText: string) {
     handleSaveToSlot,
   };
 }
+
+
+

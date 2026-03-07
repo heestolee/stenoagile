@@ -45,7 +45,7 @@ export function useVideoPlayer(mode: string) {
   }, []);
 
   // 재생목록에 영상/오디오 추가
-  const addVideosToPlaylist = async (files: FileList | File[]) => {
+  const addVideosToPlaylist = useCallback(async (files: FileList | File[]) => {
     const mediaExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.mp3', '.wav', '.m4a', '.aac'];
     const existingNames = new Set(videoPlaylist.map(v => v.name));
     const validFiles = Array.from(files).filter(file => {
@@ -78,7 +78,7 @@ export function useVideoPlayer(mode: string) {
         return updated;
       });
     }
-  };
+  }, [videoPlaylist, savePlaylistToDB]);
 
   // 재생목록에서 영상 제거
   const removeVideoFromPlaylist = (index: number) => {
@@ -109,24 +109,24 @@ export function useVideoPlayer(mode: string) {
   };
 
   // 이전 영상
-  const playPreviousVideo = () => {
+  const playPreviousVideo = useCallback(() => {
     if (videoPlaylist.length === 0) return;
     if (currentVideoIndex > 0) {
       setCurrentVideoIndex(prev => prev - 1);
     } else if (playlistLoop) {
       setCurrentVideoIndex(videoPlaylist.length - 1);
     }
-  };
+  }, [currentVideoIndex, playlistLoop, videoPlaylist.length]);
 
   // 다음 영상
-  const playNextVideo = () => {
+  const playNextVideo = useCallback(() => {
     if (videoPlaylist.length === 0) return;
     if (currentVideoIndex < videoPlaylist.length - 1) {
       setCurrentVideoIndex(prev => prev + 1);
     } else if (playlistLoop) {
       setCurrentVideoIndex(0);
     }
-  };
+  }, [currentVideoIndex, playlistLoop, videoPlaylist.length]);
 
   // 드래그 앤 드롭 핸들러
   const handleDragEnter = (e: React.DragEvent) => {
@@ -210,7 +210,7 @@ export function useVideoPlayer(mode: string) {
       document.removeEventListener('drop', handleDocumentDrop);
       document.removeEventListener('dragleave', handleDocumentDragLeave);
     };
-  }, [mode]);
+  }, [mode, addVideosToPlaylist]);
 
   // IndexedDB에서 재생목록 복원
   useEffect(() => {
@@ -358,7 +358,7 @@ export function useVideoPlayer(mode: string) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mode, videoVolume, videoPlaybackRate, videoLoop, skipSeconds, abRepeat, videoPlaylist.length, currentVideoIndex, playlistLoop]);
+  }, [mode, videoVolume, videoPlaybackRate, videoLoop, skipSeconds, abRepeat, playNextVideo, playPreviousVideo]);
 
   return {
     videoPlaylist,
