@@ -23,7 +23,7 @@ import {
   POSITION_WEAK_LINK_HIGHLIGHT_LIMIT,
   getPositionKeyIdsForChar,
 } from "../modes/position/typingConstants";
-import { GEMINI_MODEL_NAMES, GEMINI_MODEL_OPTIONS, SENTENCE_STYLES } from "../modes/sentences/constants";
+import { GEMINI_MODEL_OPTIONS, SENTENCE_STYLES } from "../modes/sentences/constants";
 import { getRandomLongTextKeyword } from "../modes/longtext/constants/longTextKeywords";
 import { generateLongTextStream } from "../modes/longtext/utils/generateLongTextAI";
 import { getFullMarkedText, getMarkedText, analyzeScoring, type FullMarkedChar, type MarkedChar, type ScoringResult } from "../modes/common/utils/scoringAnalysis";
