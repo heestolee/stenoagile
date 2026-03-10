@@ -387,6 +387,8 @@ export const useTypingStore = create<TypingState>()(
                 ? POSITION_TOTAL_QUESTION_COUNT
                 : state.mode === "random"
                 ? shuffledLetters.length
+                : state.mode === "sentences"
+                ? 0  // 문장 모드: 생성 완료 후 setTotalCount로 설정
                 : practiceWords.length,
             progressCount: 0,
             isPracticing: true,
@@ -500,7 +502,7 @@ export const useTypingStore = create<TypingState>()(
             currentWordIndex: mode === "words" || mode === "position" ? nextWordIndex : state.currentWordIndex,
             currentSentenceIndex:
               (mode === "sentences" || mode === "longtext")
-                ? isLastItem ? state.currentSentenceIndex : (state.currentSentenceIndex + 1) % Math.max(state.sentences.length, 1)
+                ? isLastItem ? state.currentSentenceIndex : Math.min(state.currentSentenceIndex + 1, Math.max(state.sentences.length - 1, 0))
                 : state.currentSentenceIndex,
             currentLetterIndex:
               mode === "random"

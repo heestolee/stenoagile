@@ -59,7 +59,7 @@ function extractSentences(accumulated: string): { sentences: string[]; remaining
     // 번호추적 프롬프트의 "1. ", "23. " 등 접두어 제거
     // 구두점 앞 불필요한 공백 제거 (예: "했습니다 ." → "했습니다.")
     const sentence = raw.replace(/^\d+\.\s*/, '').replace(/\s+([.!?,;:·…])/g, '$1');
-    sentences.push(sentence);
+    if (sentence.trim().length > 0) sentences.push(sentence);
     text = text.slice(i + 1);
 
     const nextComma = text.indexOf(",");
