@@ -13,6 +13,7 @@ export type DetailSettings = {
   isSoundEnabled?: boolean;
   showPositionKeyboard?: boolean;
   sentenceReviewWindow?: number;
+  wordsPerSentence?: number;
 };
 
 export const GLOBAL_DETAIL_SETTINGS_KEY = "detailSettings";

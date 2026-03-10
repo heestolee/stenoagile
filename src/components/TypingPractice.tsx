@@ -68,7 +68,7 @@ import {
   saveDetailSettings,
 } from "../modes/common/utils/detailSettings";
 import { formatElapsedTime } from "../modes/common/utils/timeFormat";
-import { buildTypingSpeedMetrics, countNonSpaceChars } from "../modes/common/utils/typingMetrics";
+import { buildTypingSpeedMetrics, countNonSpaceChars, countJamoKeystrokes } from "../modes/common/utils/typingMetrics";
 import { shouldBlockEnterSubmission } from "../modes/common/utils/enterConstraints";
 import { selectQuickStartSlot, splitPracticeWords } from "../modes/common/utils/quickStart";
 import { finishPracticeAndOpenDrawer, haltOngoingPractice } from "../modes/common/utils/practiceLifecycle";
@@ -82,6 +82,30 @@ import {
 } from "../modes/common/utils/inputBranching";
 import LoginPage from "../auth/components/LoginPage";
 import { useAuth } from "../auth/hooks/useAuth";
+
+// 한국어 문장 유사도 판별 (바이그램 Jaccard)
+function getSentenceBigrams(s: string): Set<string> {
+  const normalized = s.replace(/\s+/g, "");
+  const bigrams = new Set<string>();
+  for (let i = 0; i < normalized.length - 1; i++) {
+    bigrams.add(normalized.slice(i, i + 2));
+  }
+  return bigrams;
+}
+
+function computeJaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const item of a) {
+    if (b.has(item)) intersection++;
+  }
+  return intersection / (a.size + b.size - intersection);
+}
+
+function isSimilarSentence(candidate: string, pool: string[], threshold = 0.55): boolean {
+  const candidateBigrams = getSentenceBigrams(candidate);
+  return pool.some((s) => computeJaccard(candidateBigrams, getSentenceBigrams(s)) >= threshold);
+}
 
 export default function TypingPractice() {
   const {
@@ -216,6 +240,7 @@ export default function TypingPractice() {
   const [showProficiencyPanel, setShowProficiencyPanel] = useState(false);
   const [longTextLength, setLongTextLength] = useState(300);
   const [sentenceReviewWindow, setSentenceReviewWindow] = useState(50);
+  const [wordsPerSentence, setWordsPerSentence] = useState(2);
   const { reviewFailedWords, setReviewFailedWords } = useReviewFailedWords();
 
   const { positionSamples, setPositionSamples, overallPositionSamples, setOverallPositionSamples } = usePositionSamples();
@@ -386,6 +411,7 @@ export default function TypingPractice() {
       if (settings.speechRate !== undefined) useTypingStore.getState().changeSpeechRate(settings.speechRate);
       if (settings.longTextLength !== undefined) setLongTextLength(settings.longTextLength);
       if (settings.sentenceReviewWindow !== undefined) setSentenceReviewWindow(settings.sentenceReviewWindow);
+      if (settings.wordsPerSentence !== undefined) setWordsPerSentence(settings.wordsPerSentence);
     }
     // ��庰 �󼼼��� �ε�
     const modeKey = getModeDetailSettingsKey(mode);
@@ -399,6 +425,7 @@ export default function TypingPractice() {
         if (modeSettings.isSoundEnabled !== undefined && modeSettings.isSoundEnabled !== isSoundEnabled) toggleSound();
         if (modeSettings.showPositionKeyboard !== undefined) setShowPositionKeyboard(modeSettings.showPositionKeyboard);
         if (modeSettings.sentenceReviewWindow !== undefined) setSentenceReviewWindow(modeSettings.sentenceReviewWindow);
+        if (modeSettings.wordsPerSentence !== undefined) setWordsPerSentence(modeSettings.wordsPerSentence);
       }
     }
   }, [mode, isSoundEnabled, toggleSound]);
@@ -660,7 +687,7 @@ export default function TypingPractice() {
     const elapsedMs = (currentWordStartTime && currentWordKeystrokes > 0) ? Date.now() - currentWordStartTime : 0;
     const speedMetrics = buildTypingSpeedMetrics({
       elapsedMs,
-      keystrokes: currentWordKeystrokes,
+      keystrokes: countJamoKeystrokes(value),
       charCount: countNonSpaceChars(value),
     });
     if (speedMetrics) {
@@ -969,7 +996,7 @@ export default function TypingPractice() {
         (sentence) => {
           // 클라이언트 중복 필터: 이전에 나온 문장과 동일하면 스킵
           const pool = previousSentencesPoolRef.current;
-          if (pool.includes(sentence)) return;
+          if (isSimilarSentence(sentence, pool)) return;
           totalGenerated++;
           setGeneratedCount(totalGenerated);
           pool.push(sentence);
@@ -1002,6 +1029,7 @@ export default function TypingPractice() {
         abortController.signal,
         selectedModel,
         previousSentencesPoolRef.current.length > 0 ? previousSentencesPoolRef.current : existingSentences,
+        wordsPerSentence,
       );
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -1106,7 +1134,7 @@ export default function TypingPractice() {
             const abortController = new AbortController();
             generateAbortRef.current = abortController;
             const sentenceWords = useRandomSentences ? [] : words;
-            const targetCount = useRandomSentences ? 2500 : words.length;
+            const targetCount = 2500;
             const BATCH_SIZE = 2500;
             generateMoreSentences(sentenceWords, targetCount, 0, false, BATCH_SIZE);
           }
@@ -1133,7 +1161,7 @@ export default function TypingPractice() {
       sentenceReviewWindow,
     };
     saveDetailSettings(GLOBAL_DETAIL_SETTINGS_KEY, settings);
-    alert('�󼼼����� �⺻������ ����Ǿ����ϴ�');
+    alert('상세설정이 기본값으로 저장되었습니다.');
   };
 
   const handleLoadPreset = (slot: number) => {
@@ -1281,12 +1309,11 @@ export default function TypingPractice() {
     if (typedClean.endsWith(targetClean) && targetClean.length > 0) {
       // Ÿ��/�ڼ� ��� (�Ͻ����� ������ + IME ���� �� �̹ݿ� Ÿ�� ����)
       const currentElapsedMs = currentWordStartTime ? Date.now() - currentWordStartTime : 0;
-      const totalKeystrokes = accumulatedKeystrokes + currentWordKeystrokes + composingKeystrokesRef.current;
       const totalElapsedMs = accumulatedElapsedMs + currentElapsedMs;
 
       const speedMetrics = buildTypingSpeedMetrics({
         elapsedMs: totalElapsedMs,
-        keystrokes: totalKeystrokes,
+        keystrokes: countJamoKeystrokes(typedClean),
         charCount: typedClean.length,
       });
       if (speedMetrics) {
@@ -1685,23 +1712,23 @@ export default function TypingPractice() {
 
   const saveSentenceDefaults = () => {
     saveDetailSettings("detailSettings_sentences", {
-      speechRate, displayFontSize, rankFontSize, showText, isSoundEnabled, sentenceReviewWindow,
+      speechRate, displayFontSize, rankFontSize, showText, isSoundEnabled, sentenceReviewWindow, wordsPerSentence,
     });
-    alert("������ �󼼼����� �⺻������ ����Ǿ����ϴ�");
+    alert("문장모드 상세설정이 기본값으로 저장되었습니다.");
   };
 
   const saveWordDefaults = () => {
     saveDetailSettings("detailSettings_words", {
       speechRate, displayFontSize, showText, isSoundEnabled,
     });
-    alert("�ܾ��� �󼼼����� �⺻������ ����Ǿ����ϴ�");
+    alert("단어모드 상세설정이 기본값으로 저장되었습니다.");
   };
 
   const savePositionDefaults = () => {
     saveDetailSettings("detailSettings_position", {
       speechRate, displayFontSize, showText, isSoundEnabled, showPositionKeyboard,
     });
-    alert("�ڸ���� �󼼼����� �⺻������ ����Ǿ����ϴ�");
+    alert("자리연습 상세설정이 기본값으로 저장되었습니다.");
   };
 
   const handleBatchSizeChange = (size: number) => {
@@ -2060,6 +2087,9 @@ export default function TypingPractice() {
     onGeminiApiKeyChange: handleGeminiApiKeyChange,
     sentenceReviewWindow,
     onSentenceReviewWindowChange: setSentenceReviewWindow,
+    wordsPerSentence,
+    onWordsPerSentenceChange: setWordsPerSentence,
+    useRandomSentences,
     sequentialSpeed,
     sequentialSpeechRate,
     inputFontSize,
@@ -2096,6 +2126,7 @@ export default function TypingPractice() {
     modeCompletedRounds,
     onToggle: () => setShowModeStats((prev) => !prev),
     onResetMode: resetModeCompletedRounds,
+    user,
   };
 
   const practiceTopPanelsProps = {

@@ -23,6 +23,8 @@ type WordSentenceSettingsPanelProps = {
   onGeminiApiKeyChange: (apiKey: string) => void;
   sentenceReviewWindow: number;
   onSentenceReviewWindowChange: (window: number) => void;
+  wordsPerSentence: number;
+  onWordsPerSentenceChange: (n: number) => void;
 };
 
 export default function WordSentenceSettingsPanel({
@@ -48,6 +50,8 @@ export default function WordSentenceSettingsPanel({
   onGeminiApiKeyChange,
   sentenceReviewWindow,
   onSentenceReviewWindowChange,
+  wordsPerSentence,
+  onWordsPerSentenceChange,
 }: WordSentenceSettingsPanelProps) {
   if (!(isWordLikeMode || mode === "sentences")) return null;
 
@@ -121,6 +125,24 @@ export default function WordSentenceSettingsPanel({
               className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <span className="text-xs text-gray-500">px</span>
+          </div>
+        )}
+        {mode === "sentences" && (
+          <div className="flex items-center gap-1">
+            <label className="text-xs whitespace-nowrap">문장당 단어</label>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              step={1}
+              value={wordsPerSentence}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                if (!isNaN(val) && val >= 1 && val <= 20) onWordsPerSentenceChange(val);
+              }}
+              className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <span className="text-xs text-gray-500">개</span>
           </div>
         )}
         {mode === "sentences" && (

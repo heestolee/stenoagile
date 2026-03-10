@@ -38,6 +38,9 @@ type Props = {
   onGeminiApiKeyChange: (apiKey: string) => void;
   sentenceReviewWindow: number;
   onSentenceReviewWindowChange: (window: number) => void;
+  wordsPerSentence: number;
+  onWordsPerSentenceChange: (n: number) => void;
+  useRandomSentences: boolean;
   sequentialSpeed: number;
   sequentialSpeechRate: number;
   inputFontSize: number;
@@ -99,6 +102,8 @@ export default function PracticeDrawer({
   onGeminiApiKeyChange,
   sentenceReviewWindow,
   onSentenceReviewWindowChange,
+  wordsPerSentence,
+  onWordsPerSentenceChange,
   sequentialSpeed,
   sequentialSpeechRate,
   inputFontSize,
@@ -167,6 +172,8 @@ export default function PracticeDrawer({
               onGeminiApiKeyChange={onGeminiApiKeyChange}
               sentenceReviewWindow={sentenceReviewWindow}
               onSentenceReviewWindowChange={onSentenceReviewWindowChange}
+              wordsPerSentence={wordsPerSentence}
+              onWordsPerSentenceChange={onWordsPerSentenceChange}
             />
           )}
 
