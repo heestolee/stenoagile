@@ -1309,7 +1309,6 @@ export default function TypingPractice() {
     if (typedClean.endsWith(targetClean) && targetClean.length > 0) {
       // Ÿ��/�ڼ� ��� (�Ͻ����� ������ + IME ���� �� �̹ݿ� Ÿ�� ����)
       const currentElapsedMs = currentWordStartTime ? Date.now() - currentWordStartTime : 0;
-      const totalKeystrokes = accumulatedKeystrokes + currentWordKeystrokes + composingKeystrokesRef.current;
       const totalElapsedMs = accumulatedElapsedMs + currentElapsedMs;
 
       const speedMetrics = buildTypingSpeedMetrics({

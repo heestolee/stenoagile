@@ -25,7 +25,6 @@ type WordSentenceSettingsPanelProps = {
   onSentenceReviewWindowChange: (window: number) => void;
   wordsPerSentence: number;
   onWordsPerSentenceChange: (n: number) => void;
-  useRandomSentences: boolean;
 };
 
 export default function WordSentenceSettingsPanel({
@@ -53,7 +52,6 @@ export default function WordSentenceSettingsPanel({
   onSentenceReviewWindowChange,
   wordsPerSentence,
   onWordsPerSentenceChange,
-  useRandomSentences,
 }: WordSentenceSettingsPanelProps) {
   if (!(isWordLikeMode || mode === "sentences")) return null;
 
