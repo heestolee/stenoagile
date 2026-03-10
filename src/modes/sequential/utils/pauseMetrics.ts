@@ -1,4 +1,4 @@
-import { buildTypingSpeedMetrics, countNonSpaceChars, type TypingSpeedMetrics } from "../../common/utils/typingMetrics";
+import { buildTypingSpeedMetrics, countNonSpaceChars, countJamoKeystrokes, type TypingSpeedMetrics } from "../../common/utils/typingMetrics";
 
 type BuildSequentialPauseMetricsParams = {
   typedWord: string;
@@ -32,7 +32,7 @@ export function buildSequentialPauseMetrics(
   const totalElapsedMs = accumulatedElapsedMs + currentElapsedMs;
   const speedMetrics = buildTypingSpeedMetrics({
     elapsedMs: totalElapsedMs,
-    keystrokes: totalKeystrokes,
+    keystrokes: countJamoKeystrokes(typedWord),
     charCount: countNonSpaceChars(typedWord),
   });
 

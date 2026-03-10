@@ -6,7 +6,7 @@ import {
   evaluateWordEnterSubmission,
   normalizeWordKey,
 } from "../../words/utils/enterSubmit";
-import { buildTypingSpeedMetrics, countNonSpaceChars, type TypingSpeedMetrics } from "../utils/typingMetrics";
+import { buildTypingSpeedMetrics, countNonSpaceChars, countJamoKeystrokes, type TypingSpeedMetrics } from "../utils/typingMetrics";
 
 type ModeResultEntry = {
   kpm: number;
@@ -98,7 +98,7 @@ export function useGeneralEnterSubmit(params: UseGeneralEnterSubmitParams) {
 
       const speedMetrics = buildTypingSpeedMetrics({
         elapsedMs,
-        keystrokes: currentWordKeystrokes,
+        keystrokes: countJamoKeystrokes(typedWord),
         charCount: countNonSpaceChars(typedWord),
       });
       if (speedMetrics) {

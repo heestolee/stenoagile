@@ -171,13 +171,14 @@ export function claudePlugin(): Plugin {
           const body = await readBody(req);
 
           try {
-            const { words, count, apiKey, style, preferredModel, previousSentences } = JSON.parse(body) as {
+            const { words, count, apiKey, style, preferredModel, previousSentences, wordsPerSentence } = JSON.parse(body) as {
               words: string[];
               count: number;
               apiKey: string;
               style?: string;
               preferredModel?: string;
               previousSentences?: string[];
+              wordsPerSentence?: number;
             };
 
             if (!apiKey) {
@@ -193,9 +194,10 @@ export function claudePlugin(): Plugin {
               ? "각 문장마다 뉴스/일상, 비즈니스 공문, 학술/논문, 소설/문학, 법률/계약, 의료/건강, IT/기술, 스포츠 중계, 요리/레시피, 여행/관광 등 다양한 대화체를 섞어서. 문장 뒤에 대화체 종류를 표시하지 마세요"
               : `자연스러운 ${style || "뉴스/일상 대화체"}로`;
 
+            const perSentence = wordsPerSentence ?? 2;
             const wordInstruction = isRandomMode
               ? "자유로운 주제로 최대한 다양한 단어와 표현을 사용하여"
-              : `단어 목록: ${words.join(", ")}\n이 단어들을 포함하여`;
+              : `단어 풀: ${words.join(", ")}\n매 문장마다 위 단어 중 ${perSentence}개를 다르게 골라 자연스럽게 활용하여 (매 문장마다 다른 조합을 선택할 것)`;
 
             // 이전 문장이 있으면 중복 방지 지시 추가 (최근 100개만 전송)
             let avoidInstruction = "";
@@ -213,7 +215,9 @@ ${wordInstruction}
 - 주어-서술어 패턴을 반복하지 마세요. 주어 생략, 도치, 피동/사동, 접속문, 부사구 시작 등 다양한 구조를 사용하세요.
 - 같은 어미(-습니다, -했다, -한다 등)가 연속으로 반복되지 않게 하세요.
 - 문장의 분위기와 톤도 다양하게: 설명, 묘사, 감정, 사실 전달, 비유, 대화 등을 섞으세요.
-- 같은 단어나 표현이 반복되지 않도록 하세요.${avoidInstruction}
+- 같은 단어나 표현이 반복되지 않도록 하세요.
+- 이 배치 안에서도 문장끼리 비슷하면 안 됩니다. 각 문장은 앞에 나온 문장과 주제·구조·어휘가 모두 달라야 합니다.
+- 문장의 첫 어절과 마지막 서술어가 다른 문장과 겹치지 않게 하세요.${avoidInstruction}
 
 중요: 각 문장 앞에 번호를 붙여서 진행 상황을 추적하세요.
 형식: ["1. 문장내용", "2. 문장내용", ..., "${count}. 문장내용"]
