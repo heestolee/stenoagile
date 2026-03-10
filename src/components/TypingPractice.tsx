@@ -179,7 +179,7 @@ export default function TypingPractice() {
     todayCompletedRounds, slotCompletedRoundsNormal, slotCompletedRoundsBatch, modeCompletedRounds,
     practiceSlot, setPracticeSlot, setPendingIncrementSlot,
     incrementCompletedRounds, resetModeCompletedRounds, handleRenameSlot, toggleFavoriteSlot, handleSaveToSlot,
-  } = useSlotManager(inputText);
+  } = useSlotManager(inputText, user);
   const [displayFontSize, setDisplayFontSize] = useState(20); // ���� ǥ�� ���� ���� ũ��
   const [inputFontSize, setInputFontSize] = useState(19.5); // �Ʒ��� Ÿ���� ���� ���� ũ��
   const [rankFontSize, setRankFontSize] = useState(12); // �ְ�Ÿ/����Ÿ ���� ���� ũ��
@@ -994,7 +994,8 @@ export default function TypingPractice() {
         geminiApiKey,
         sentenceStyle,
         (sentence) => {
-          // 클라이언트 중복 필터: 이전에 나온 문장과 동일하면 스킵
+          // 빈 문자열 및 클라이언트 중복 필터
+          if (!sentence || sentence.trim().length === 0) return;
           const pool = previousSentencesPoolRef.current;
           if (isSimilarSentence(sentence, pool)) return;
           totalGenerated++;

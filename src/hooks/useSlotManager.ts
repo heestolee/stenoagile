@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 
 // KST 기준 날짜 반환 (오전 5시 이전은 전날로 처리)
@@ -11,7 +12,7 @@ const getKstDate = (): string => {
   return kst.toISOString().split('T')[0];
 };
 
-export function useSlotManager(inputText: string) {
+export function useSlotManager(inputText: string, user: User | null = null) {
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [slotNames, setSlotNames] = useState<{ [key: number]: string }>({});
   const [favoriteSlots, setFavoriteSlots] = useState<Set<number>>(new Set());
@@ -23,6 +24,70 @@ export function useSlotManager(inputText: string) {
   const [modeCompletedRounds, setModeCompletedRounds] = useState<Record<string, number>>({});
   const [practiceSlot, setPracticeSlot] = useState<number | null>(null);
   const [pendingIncrementSlot, setPendingIncrementSlot] = useState<number | null>(null);
+  const prevUserRef = useRef<User | null>(null);
+
+  // 로그인 시 localStorage 기록 → Supabase 마이그레이션
+  useEffect(() => {
+    const prevUser = prevUserRef.current;
+    prevUserRef.current = user;
+
+    // null → non-null: 로그인 이벤트
+    if (!prevUser && user) {
+      (async () => {
+        type HistoryEntry = { date: string; total: number; mode_counts: Record<string, number> };
+        const rows: HistoryEntry[] = [];
+
+        // completedRoundsHistory 수집
+        try {
+          const raw = localStorage.getItem("completedRoundsHistory");
+          if (raw) {
+            const parsed: HistoryEntry[] = JSON.parse(raw);
+            rows.push(...parsed);
+          }
+        } catch { /* ignore */ }
+
+        // completedRounds(오늘) 수집 — history에 없으면 추가
+        try {
+          const raw = localStorage.getItem("completedRounds");
+          if (raw) {
+            const today = JSON.parse(raw) as { date: string; count: number; modeCounts?: Record<string, number>; mode_counts?: Record<string, number> };
+            if (today.date && today.count > 0) {
+              const already = rows.some((r) => r.date === today.date);
+              if (!already) {
+                rows.push({ date: today.date, total: today.count, mode_counts: today.mode_counts ?? today.modeCounts ?? {} });
+              }
+            }
+          }
+        } catch { /* ignore */ }
+
+        if (rows.length === 0) return;
+
+        // 기존 Supabase 데이터 조회 후 합산 upsert
+        const dates = rows.map((r) => r.date);
+        const { data: existing } = await supabase
+          .from("daily_completions")
+          .select("date, total, mode_counts")
+          .eq("user_id", user.id)
+          .in("date", dates);
+
+        const existingMap: Record<string, HistoryEntry> = {};
+        (existing ?? []).forEach((e: HistoryEntry) => { existingMap[e.date] = e; });
+
+        const upsertRows = rows.map((r) => {
+          const ex = existingMap[r.date];
+          if (!ex) return { user_id: user.id, date: r.date, total: r.total, mode_counts: r.mode_counts, updated_at: new Date().toISOString() };
+          // 합산: total은 최대값, mode_counts는 각 키 합산
+          const mergedCounts: Record<string, number> = { ...ex.mode_counts };
+          Object.entries(r.mode_counts).forEach(([k, v]) => {
+            mergedCounts[k] = Math.max(mergedCounts[k] ?? 0, v);
+          });
+          return { user_id: user.id, date: r.date, total: Math.max(ex.total, r.total), mode_counts: mergedCounts, updated_at: new Date().toISOString() };
+        });
+
+        await supabase.from("daily_completions").upsert(upsertRows, { onConflict: "user_id,date" });
+      })();
+    }
+  }, [user]);
 
   // 슬롯 이름 로드 및 현재 텍스트와 일치하는 슬롯 찾기
   useEffect(() => {
