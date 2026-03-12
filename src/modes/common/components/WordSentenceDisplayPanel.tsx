@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 
 type Props = {
   mode: string;
@@ -58,7 +57,12 @@ export default function WordSentenceDisplayPanel({
             {previousSentence.split("").map((char, i) => {
               const typedChar = lastSentenceTyped[i];
               if (typedChar === undefined) return <span key={i}>{char}</span>;
-              if (typedChar !== char) return <span key={i} style={{ color: "red" }}>{char}</span>;
+              if (typedChar !== char) return (
+                <span key={i} style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", color: "red", verticalAlign: "bottom", whiteSpace: "pre" }}>
+                  <span style={{ fontSize: "0.65em", lineHeight: 1.1, WebkitTextStroke: "0.5px red", color: "transparent" }}>ᵛ</span>
+                  <span>{char}</span>
+                </span>
+              );
               return <span key={i}>{char}</span>;
             })}
           </p>
@@ -84,21 +88,21 @@ export default function WordSentenceDisplayPanel({
                 const target = sentences[currentSentenceIndex] || "";
                 const confirmedLen = isComposing && typedWord.length > 0 ? typedWord.length - 1 : typedWord.length;
                 return target.split("").map((char, i) => {
-                  let style: CSSProperties = {};
-                  let displayChar = char;
                   if (i < confirmedLen) {
                     if (typedWord[i] === char) {
-                      style = { color: "blue" };
-                    } else if (char === " ") {
-                      displayChar = "∨";
-                      style = { color: "red", fontSize: "0.8em" };
-                    } else {
-                      style = { color: "red", textDecoration: "underline" };
+                      return <span key={i} style={{ color: "blue" }}>{char}</span>;
                     }
-                  } else if (i === confirmedLen && isComposing) {
-                    style = { color: "#9CA3AF" };
+                    return (
+                      <span key={i} style={{ position: "relative", display: "inline-block", color: "red", whiteSpace: "pre" }}>
+                        <span style={{ position: "absolute", top: "-0.8em", left: "50%", transform: "translateX(-50%)", color: "red", fontSize: "1.2em", fontWeight: "bold", lineHeight: 1 }}>ᵛ</span>
+                        {char}
+                      </span>
+                    );
                   }
-                  return <span key={i} style={style}>{displayChar}</span>;
+                  if (i === confirmedLen && isComposing) {
+                    return <span key={i} style={{ color: "#9CA3AF" }}>{char}</span>;
+                  }
+                  return <span key={i}>{char}</span>;
                 });
               })()
             : ""}
