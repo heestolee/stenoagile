@@ -59,7 +59,8 @@ function extractSentences(accumulated: string): { sentences: string[]; remaining
     // 번호추적 프롬프트의 "1. ", "23. " 등 접두어 제거
     // 구두점 앞 불필요한 공백 제거 (예: "했습니다 ." → "했습니다.")
     const sentence = raw.replace(/^\d+\.\s*/, '').replace(/\s+([.!?,;:·…])/g, '$1');
-    if (sentence.trim().length > 0) sentences.push(sentence);
+    const isMeta = /중략|생략|형식\s*유지|\.{3}\s*\(/.test(sentence);
+    if (sentence.trim().length > 0 && !isMeta) sentences.push(sentence);
     text = text.slice(i + 1);
 
     const nextComma = text.indexOf(",");
@@ -219,9 +220,14 @@ ${wordInstruction}
 - 이 배치 안에서도 문장끼리 비슷하면 안 됩니다. 각 문장은 앞에 나온 문장과 주제·구조·어휘가 모두 달라야 합니다.
 - 문장의 첫 어절과 마지막 서술어가 다른 문장과 겹치지 않게 하세요.${avoidInstruction}
 
+절대 금지 (위반 시 실패):
+- "...", "(중략)", "(생략)", "(형식 유지)", "(이하 생략)" 등 어떤 생략/축약 표시도 쓰지 마세요.
+- 중간에 멈추거나 요약하거나 건너뛰지 마세요.
+- 메타 주석이나 설명을 문장 안에 넣지 마세요.
+
 중요: 각 문장 앞에 번호를 붙여서 진행 상황을 추적하세요.
 형식: ["1. 문장내용", "2. 문장내용", ..., "${count}. 문장내용"]
-${count}번까지 반드시 전부 작성하세요. 번호가 ${count}이 될 때까지 절대 멈추지 마세요.
+반드시 1번부터 ${count}번까지 실제 문장 ${count}개를 전부 작성하세요. ${count}번이 될 때까지 절대 멈추지 마세요.
 JSON 배열로만 응답하세요.`;
 
             const https = await import("https");
