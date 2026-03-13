@@ -609,10 +609,22 @@ export default function TypingPractice() {
     });
   };
 
-  const handleCompositionStart = () => { isComposingRef.current = true; };
+  const handleCompositionStart = () => {
+    isComposingRef.current = true;
+    const input = wordInputRef.current ?? typingTextareaRef.current;
+    if (input) {
+      const len = input.value.length;
+      const cursorPos = input.selectionStart ?? len;
+      // 커서 바로 다음 글자가 공백인 경우만 커서를 끝으로 이동 (약어 공백 앞 케이스)
+      // 일반 한국어 조합 중에는 커서가 조합 글자 위치에 있고 다음이 공백이 아님
+      if (cursorPos < len && input.value[cursorPos] === " ") {
+        input.setSelectionRange(len, len);
+      }
+    }
+  };
   const handleCompositionEnd = (event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     isComposingRef.current = false;
-    // ���� �Ϸ� ����: ���� �Է°��� state�� ����ȭ (���� �� ������ ��ŵ�����Ƿ�)
+    // 조합 완료 처리: 현재 입력값을 state에 동기화 (조합 중 onChange는 건너뛰었으므로)
     const value = (event.target as HTMLInputElement | HTMLTextAreaElement).value;
     updateTypedWord(value);
     pendingCompositionEndRef.current = true;
@@ -644,12 +656,12 @@ export default function TypingPractice() {
   };
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const value = event.target.value;
+
     if (isAutoSubmittingRef.current) {
       clearInputElement();
       return;
     }
-
-    const value = event.target.value;
 
     if (isComposingRef.current) {
       handleComposingInput();
