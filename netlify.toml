@@ -2,6 +2,19 @@
   command = "npm run build"
   publish = "dist"
 
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/generate-sentences"
+  to = "/.netlify/functions/generate-sentences"
+  status = 200
+
+[[redirects]]
+  from = "/api/generate-longtext"
+  to = "/.netlify/functions/generate-longtext"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
