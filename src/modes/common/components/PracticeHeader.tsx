@@ -15,6 +15,7 @@ type Props = {
   isLoggedIn: boolean;
   onLogin: () => void;
   onLogout: () => void;
+  userEmail?: string;
 };
 
 export default function PracticeHeader({
@@ -30,6 +31,7 @@ export default function PracticeHeader({
   isLoggedIn,
   onLogin,
   onLogout,
+  userEmail,
 }: Props) {
   return (
     <div className="flex items-center gap-4 mb-4">
@@ -45,7 +47,7 @@ export default function PracticeHeader({
         onSequential={onSequential}
         onRandom={onRandom}
       />
-      <LoginToggleButton isLoggedIn={isLoggedIn} onLogout={onLogout} onLogin={onLogin} />
+      <LoginToggleButton isLoggedIn={isLoggedIn} onLogout={onLogout} onLogin={onLogin} userEmail={userEmail} />
     </div>
   );
 }

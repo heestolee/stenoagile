@@ -2065,6 +2065,7 @@ export default function TypingPractice() {
     onSequential: handleSwitchSequential,
     onRandom: handleSwitchRandom,
     isLoggedIn: !!user,
+    userEmail: user?.email,
     onLogout: signOut,
     onLogin: () => setShowLoginModal(true),
   };
