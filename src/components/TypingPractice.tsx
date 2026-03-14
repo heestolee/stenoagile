@@ -168,7 +168,7 @@ export default function TypingPractice() {
   const isWordLikeMode = mode === "words" || mode === "position";
 
   const [showText, setShowText] = useState(true);
-  const [practicingMode, setPracticingMode] = useState<string | null>(null); // ���� ������ ��� ����
+  const [practicingMode, setPracticingMode] = useState<string | null>(null); // 현재 연습 중인 모드 저장
   const [showPositionKeyboard, setShowPositionKeyboard] = useState(true);
   const [hoveredPositionKeyId, setHoveredPositionKeyId] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState({ kpm: 0, cpm: 0, elapsedTime: 0 });
@@ -180,59 +180,59 @@ export default function TypingPractice() {
     practiceSlot, setPracticeSlot, setPendingIncrementSlot,
     incrementCompletedRounds, resetModeCompletedRounds, handleRenameSlot, toggleFavoriteSlot, handleSaveToSlot,
   } = useSlotManager(inputText, user);
-  const [displayFontSize, setDisplayFontSize] = useState(20); // ���� ǥ�� ���� ���� ũ��
-  const [inputFontSize, setInputFontSize] = useState(19.5); // �Ʒ��� Ÿ���� ���� ���� ũ��
-  const [rankFontSize, setRankFontSize] = useState(12); // �ְ�Ÿ/����Ÿ ���� ���� ũ��
-  const [charsPerRead, setCharsPerRead] = useState(3); // �� ���ھ� ������
-  const [sequentialSpeechRate, setSequentialSpeechRate] = useState(1); // ����ġ�� ���� �ӵ� (1���)
+  const [displayFontSize, setDisplayFontSize] = useState(20); // 위쪽 표시 영역 글자 크기
+  const [inputFontSize, setInputFontSize] = useState(19.5); // 아래쪽 타이핑 입력 글자 크기
+  const [rankFontSize, setRankFontSize] = useState(12); // 최고타/평균타 결과 글자 크기
+  const [charsPerRead, setCharsPerRead] = useState(3); // 몇 글자마다 읽어줄지
+  const [sequentialSpeechRate, setSequentialSpeechRate] = useState(1); // 보고치라 음성 속도 (1배속)
   const { speakText, clearAllTimeouts } = useHeamiVoice(isSoundEnabled, speechRate, sequentialSpeechRate);
-  const [countdown, setCountdown] = useState<number | null>(null); // ī��Ʈ�ٿ� ����
-  const [, setRoundStartTime] = useState<number | null>(null); // ���� ���� �ð�
+  const [countdown, setCountdown] = useState<number | null>(null); // 카운트다운 상태
+  const [, setRoundStartTime] = useState<number | null>(null); // 라운드 시작 시간
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [isRoundComplete, setIsRoundComplete] = useState(false); // ���� �Ϸ� ���� (��� Ȯ�� ���)
-  const [isSentenceReview, setIsSentenceReview] = useState(false); // ������ ���� �� ����
-  const lastSentenceReviewAtRef = useRef(0); // ������ ���� Ʈ���ŵ� progressCount
-  const [preReviewResults, setPreReviewResults] = useState<typeof allResults>([]); // ���� �� �ְ�Ÿ/����Ÿ ������
-  const [accumulatedKeystrokes, setAccumulatedKeystrokes] = useState(0); // ���� Ÿ��
-  const [accumulatedElapsedMs, setAccumulatedElapsedMs] = useState(0); // ���� ��� �ð�
-  const [displayElapsedTime, setDisplayElapsedTime] = useState(0); // �ǽð� ǥ�ÿ� ��� �ð�
-  const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // Ÿ���� ĭ ����
-  const wordInputRef = useRef<HTMLInputElement | null>(null); // �ܾ�/���� ��� �Է� ĭ ����
-  const practiceInputRef = useRef<HTMLTextAreaElement | null>(null); // ���� ĭ ����
-  const isAutoSubmittingRef = useRef(false); // �ڵ� ���� �ߺ� ����
-  const isComposingRef = useRef(false); // �ѱ� IME ���� �� ����
-  const pendingCompositionEndRef = useRef(false); // ���� �Ϸ� �� �ڵ����� ��üũ �÷���
-  const composingKeystrokesRef = useRef(0); // ���� �� Ÿ�� ī��Ʈ (ref�� �����Ͽ� ������ ����)
-  const composingRAFRef = useRef<number | null>(null); // ���� �� RAF ��ٿ ID
-  const elapsedTimerRef = useRef<HTMLSpanElement | null>(null); // ����ð� DOM ���� ������Ʈ��
+  const [isRoundComplete, setIsRoundComplete] = useState(false); // 라운드 완료 상태 (결과 확인 중)
+  const [isSentenceReview, setIsSentenceReview] = useState(false); // 문장모드 복습 중 여부
+  const lastSentenceReviewAtRef = useRef(0); // 문장 복습이 트리거된 progressCount
+  const [preReviewResults, setPreReviewResults] = useState<typeof allResults>([]); // 복습 전 최고타/평균타 보존용
+  const [accumulatedKeystrokes, setAccumulatedKeystrokes] = useState(0); // 누적 타수
+  const [accumulatedElapsedMs, setAccumulatedElapsedMs] = useState(0); // 누적 경과 시간
+  const [displayElapsedTime, setDisplayElapsedTime] = useState(0); // 실시간 표시용 경과 시간
+  const typingTextareaRef = useRef<HTMLTextAreaElement | null>(null); // 타이핑 칸 참조
+  const wordInputRef = useRef<HTMLInputElement | null>(null); // 단어/문장 모드 입력 칸 참조
+  const practiceInputRef = useRef<HTMLTextAreaElement | null>(null); // 연습 칸 참조
+  const isAutoSubmittingRef = useRef(false); // 자동 제출 중복 방지
+  const isComposingRef = useRef(false); // 한국어 IME 조합 중 여부
+  const pendingCompositionEndRef = useRef(false); // 조합 완료 후 자동처리 체크 플래그
+  const composingKeystrokesRef = useRef(0); // 조합 중 타수 카운트 (ref로 관리하여 리렌더 방지)
+  const composingRAFRef = useRef<number | null>(null); // 조합 중 RAF 핸들 ID
+  const elapsedTimerRef = useRef<HTMLSpanElement | null>(null); // 경과시간 DOM 직접 업데이트용
 
-  // input�� ���� Ŭ�����ϴ� ���� (uncontrolled input��)
+  // input을 직접 클리어하는 함수 (uncontrolled input용)
   const clearInputElement = () => {
     if (wordInputRef.current) wordInputRef.current.value = "";
     if (typingTextareaRef.current) typingTextareaRef.current.value = "";
   };
-  const displayAreaRef = useRef<HTMLDivElement | null>(null); // ���� ǥ�� ���� ����
+  const displayAreaRef = useRef<HTMLDivElement | null>(null); // 표시 영역 스크롤 참조
 
-  // �Ÿ�ġ�� ��� ����
-  const [isBatchMode, setIsBatchMode] = useState(false); // �Ÿ�ġ�� ��� Ȱ��ȭ ����
-  const [batchSize, setBatchSize] = useState(5); // �ѹ��� ������ ���� ��
-  const [batchStartIndex, setBatchStartIndex] = useState(0); // ���� ��ġ ���� �ε���
-  const [currentBatchChars, setCurrentBatchChars] = useState<string>(""); // ���� ��ġ�� ǥ�õ� ���ڵ�
-  const [batchRandomFillCount, setBatchRandomFillCount] = useState(0); // ������ ��ġ���� �������� ä�� ���� ��
+  // 매매치라 관련 상태
+  const [isBatchMode, setIsBatchMode] = useState(false); // 매매치라 모드 활성화 여부
+  const [batchSize, setBatchSize] = useState(5); // 한번에 표시할 글자 수
+  const [batchStartIndex, setBatchStartIndex] = useState(0); // 현재 배치 시작 인덱스
+  const [currentBatchChars, setCurrentBatchChars] = useState<string>(""); // 현재 배치에 표시된 글자들
+  const [batchRandomFillCount, setBatchRandomFillCount] = useState(0); // 마지막 배치에서 랜덤으로 채운 글자 수
 
-  // ���� ��� ���� (�ð� ���� �ɸ� 5�� �ٽ� ����)
-  const [isReviewMode, setIsReviewMode] = useState(false); // ���� ��� ����
-  const [reviewBatches, setReviewBatches] = useState<string[]>([]); // ������ ��ġ ���
-  const [reviewIndex, setReviewIndex] = useState(0); // ���� ���� ���� �ε���
-  const [isBatchReviewDone, setIsBatchReviewDone] = useState(false); // �������� ������ ��������
+  // 복습 모드 관련 (시간 많이 걸린 5개 다시 연습)
+  const [isReviewMode, setIsReviewMode] = useState(false); // 복습 모드 여부
+  const [reviewBatches, setReviewBatches] = useState<string[]>([]); // 복습할 배치 목록
+  const [reviewIndex, setReviewIndex] = useState(0); // 현재 복습 중인 인덱스
+  const [isBatchReviewDone, setIsBatchReviewDone] = useState(false); // 배치복습 완료 여부
 
-  // �ܾ��� ���� �ڵ����� ��
+  // 단어모드 복습 자동처리 훅
   const {
     isReviewActive, reviewWords, currentReviewIndex, currentReviewTarget,
     reviewType, checkAndStartReview, startFailedReview, handleReviewSubmit, resetReview,
   } = useWordReview({ onRemoveIncorrectWord: removeIncorrectWord });
 
-  // �ܾ� ���õ� ���� ��
+  // 단어 숙련도 관련 훅
   const {
     todayProficiencies, overallProficiencies, recordResult,
     refreshToday, refreshOverall, clearToday, clearOverall, mergeToOverall,
@@ -309,20 +309,20 @@ export default function TypingPractice() {
   const prevReviewActiveRef = useRef(false);
   const prevReviewTypeRef = useRef<string | null>(null);
 
-  // 1�� ���� ������ �����Ʈ �ڵ� ���� (1ȸ��)
+  // 1차 복습 완료 시 실패단어 자동 연결 (1회씩)
   useEffect(() => {
     const wasActive = prevReviewActiveRef.current;
     const wasType = prevReviewTypeRef.current;
     prevReviewActiveRef.current = isReviewActive;
     prevReviewTypeRef.current = reviewType;
 
-    // 1�� ������ ��� ������ ���� 2�� ����
+    // 1차 복습이 끝난 후 실패단어 있으면 2차 시작
     if (wasActive && !isReviewActive && wasType === "primary" && reviewFailedWords.length > 0) {
       startFailedReview(reviewFailedWords);
     }
   }, [isReviewActive, reviewType, reviewFailedWords, startFailedReview]);
 
-  // ���� �÷��̾� ��
+  // 비디오 플레이어 훅
   const {
     videoPlaylist, currentVideoIndex, setCurrentVideoIndex,
     videoPlaybackRate, setVideoPlaybackRate, videoVolume, setVideoVolume,
@@ -335,13 +335,13 @@ export default function TypingPractice() {
     handleDragEnter, handleDragOver, handleDragLeave, handleDrop,
   } = useVideoPlayer(mode);
 
-  // ���̶���Ʈ�� ���� (�Ʒ�ĭ hover �� ��ĭ �ش� ��ġ ǥ��)
+  // 하이라이트용 상태 (아래칸 hover 시 위칸 해당 위치 표시)
   const [hoveredOrigIdx, setHoveredOrigIdx] = useState<number | null>(null);
 
-  // ���� �Ϸ� �� ������ �ؽ�Ʈ
+  // 라운드 완료 후 채점용 텍스트
   const [practiceText, setPracticeText] = useState("");
 
-  // �簳 ���� ���̶���Ʈ ǥ�ÿ�
+  // 재개 위치 하이라이트 표시용
   const [showResumeHighlight, setShowResumeHighlight] = useState(false);
   const [resumePosition, setResumePosition] = useState(0);
   const positionCycleToast = usePositionCycleToast({
@@ -355,7 +355,7 @@ export default function TypingPractice() {
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
 
-  // �ܾ�/���� ��� ���� �Ϸ� ���
+  // 단어/문장 모드 라운드 완료 결과
   const [roundCompleteResult, setRoundCompleteResult] = useState<WordSentenceRoundCompleteResult | null>(null);
 
   // 이전 문장 기록 풀 (localStorage에서 복원, 최대 300개)
@@ -370,7 +370,7 @@ export default function TypingPractice() {
     } catch { /* ignore */ }
   }
 
-  // AI ���� ���� ��
+  // AI 생성 관련 훅
   const {
     geminiApiKey, setGeminiApiKey, isGenerating, setIsGenerating,
     generatedCount, setGeneratedCount, aiModelName, setAiModelName,
@@ -382,7 +382,7 @@ export default function TypingPractice() {
   } = useAIGeneration();
   const [canGenerateMore, setCanGenerateMore] = useState(false);
   const sentenceTargetCountRef = useRef(0);
-  // ������ ���� ���� (��� ��ȯ �� API ȣ�� ����)
+  // 문장모드 상태 저장 (모드 전환 후 API 호출 없이 복원)
   const savedSentenceStateRef = useRef<SavedSentenceState | null>(null);
   const savedLongtextStateRef = useRef<SavedLongtextState | null>(null);
   // 긴글모드 랜덤 생성 전용 state
@@ -394,11 +394,11 @@ export default function TypingPractice() {
   const generateLongTextAbortRef = useRef<AbortController | null>(null);
   const [longtextStyle, setLongtextStyle] = useState("자유 문체");
   const [longtextUseRandom, setLongtextUseRandom] = useState(true);
-  // ������ ���� �� ���� ���� (���� �� ���� ��ġ�� ����)
+  // 문장복습 직전 상태 저장 (복습 후 이전 위치로 복원)
   const preReviewSentenceStateRef = useRef<SavedSentenceState | null>(null);
 
 
-  // ����� �󼼼��� ����
+  // 전역 상세설정 로드
   useEffect(() => {
     const settings = loadDetailSettings(GLOBAL_DETAIL_SETTINGS_KEY);
     if (settings) {
@@ -413,7 +413,7 @@ export default function TypingPractice() {
       if (settings.sentenceReviewWindow !== undefined) setSentenceReviewWindow(settings.sentenceReviewWindow);
       if (settings.wordsPerSentence !== undefined) setWordsPerSentence(settings.wordsPerSentence);
     }
-    // ��庰 �󼼼��� �ε�
+    // 모드별 상세설정 로드
     const modeKey = getModeDetailSettingsKey(mode);
     if (modeKey) {
       const modeSettings = loadDetailSettings(modeKey);
@@ -430,10 +430,10 @@ export default function TypingPractice() {
     }
   }, [mode, isSoundEnabled, toggleSound]);
 
-  // ������ ���ΰ�ħ �� �ڵ� �簳
+  // 문장모드 마운트/언마운트 시 자동 재개
   useEffect(() => {
     if (isPracticing && mode === "sentences" && sentences.length > 0) {
-      // persist�� ������ ���� ? �Է� �ʵ忡 ��Ŀ��
+      // persist된 문장모드 상태가 있으면 입력 필드에 포커스
       setTimeout(() => {
         wordInputRef.current?.focus();
       }, 100);
@@ -441,7 +441,7 @@ export default function TypingPractice() {
   }, [isPracticing, mode, sentences.length]);
 
 
-  // �ܾ�/����/�ڸ� ��� ���� �Ϸ� ����
+  // 단어/문장/자리 모드 라운드 완료 처리
   useWordSentenceRoundCompletion({
     mode,
     isPracticing,
@@ -476,7 +476,7 @@ export default function TypingPractice() {
     incrementCompletedRounds,
   });
 
-  // ������ 20������ ����Ÿ 5�� �ڵ� ����
+  // 문장모드 N개마다 복습타 5개 자동 시작
   useSentencePeriodicReview({
     mode,
     isPracticing,
@@ -501,7 +501,7 @@ export default function TypingPractice() {
   };
 
   const resumeRound = () => {
-    // ������ 10���ڷ� �������� ���� ������ ��ġ ã��
+    // 타이핑 10글자로 거슬러올라가 최선의 재개 위치 찾기
     const text = isBatchMode
       ? currentBatchChars
       : randomizedIndices.slice(0, currentDisplayIndex).map(index => sequentialText[index]).join('');
@@ -511,8 +511,8 @@ export default function TypingPractice() {
     setShowResumeHighlight(true);
 
     setIsRoundComplete(false);
-    setPracticeText(""); // ���� �ؽ�Ʈ �ʱ�ȭ
-    // Ÿ���� ĭ�� ��Ŀ���ϰ� Ŀ���� ������ �̵�
+    setPracticeText(""); // 채점 텍스트 초기화
+    // 타이핑 칸에 포커스하고 커서를 끝으로 이동
     setTimeout(() => {
       const textarea = typingTextareaRef.current;
       if (textarea) {
@@ -522,14 +522,14 @@ export default function TypingPractice() {
     }, 50);
   };
 
-  // ���� ���� ���� (ī��Ʈ�ٿ� ����)
-  // completedSlot: ��� �Ϸ��� ���� (ī��Ʈ�ٿ� ���� �� increment)
-  // wasBatchMode: �Ϸ��� ���尡 �Ÿ�ġ�� ��忴����
-  // nextSlot: ������ ������ ���� (�������� ������ selectedSlot ���)
+  // 다음 라운드 시작 (카운트다운 포함)
+  // completedSlot: 방금 완료한 슬롯 (카운트다운 이후에 increment)
+  // wasBatchMode: 완료한 라운드가 매매치라 모드였는지
+  // nextSlot: 다음에 연습할 슬롯 (미지정이면 현재 selectedSlot 유지)
   const startNextRound = (nextSlot?: number) => {
-    // ��ξ� �ݱ�
+    // 드로어 닫기
     setIsDrawerOpen(false);
-    // ���� ���� ���� (nextSlot�� ������ ���, ������ selectedSlot)
+    // 연습 슬롯 설정 (nextSlot이 지정된 경우, 아니면 selectedSlot)
     const targetSlot = nextSlot ?? selectedSlot;
     setPracticeSlot(targetSlot);
     if (nextSlot !== undefined) {
@@ -540,17 +540,17 @@ export default function TypingPractice() {
     setAccumulatedKeystrokes(0);
     setAccumulatedElapsedMs(0);
     setDisplayElapsedTime(0);
-    updateTypedWord(""); clearInputElement(); // Ÿ���� ĭ �ʱ�ȭ
-    setPracticeText(""); // ���� �ؽ�Ʈ �ʱ�ȭ
-    setShowResumeHighlight(false); // ���̶���Ʈ �ʱ�ȭ
+    updateTypedWord(""); clearInputElement(); // 타이핑 칸 초기화
+    setPracticeText(""); // 채점 텍스트 초기화
+    setShowResumeHighlight(false); // 하이라이트 초기화
     resetBatchAndReviewState();
-    // Ÿ��/�ڼ� �ʱ�ȭ
+    // 타수/결과 초기화
     setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
     setAllResults([]);
     startCountdown(() => {
       setRoundStartTime(Date.now());
       restartSequentialPractice();
-      // Ÿ���� ĭ�� ��Ŀ��
+      // 타이핑 칸에 포커스
       setTimeout(() => {
         if (mode === "longtext") {
           wordInputRef.current?.focus();
@@ -567,7 +567,7 @@ export default function TypingPractice() {
 
   const handleTextareaDrop = (event: React.DragEvent<HTMLTextAreaElement>) => {
     event.preventDefault();
-    // �ؽ�Ʈ �巡��&��� ó��
+    // 텍스트 드래그&드롭 처리
     const droppedText = event.dataTransfer.getData("text/plain");
     if (droppedText) {
       updateInputText(inputText ? inputText + "/" + droppedText : droppedText);
@@ -946,8 +946,8 @@ export default function TypingPractice() {
       return;
     }
 
-    // ���� ���� �Է� Ű�� ī��Ʈ�մϴ�.
-    // ������ Ű(Ctrl, Alt, Meta), ����Ű, ���Ű ���� �����մϴ�.
+    // 유효한 입력 키만 카운트합니다.
+    // 수식어 키(Ctrl, Alt, Meta), 화살표키, 기능키 등은 제외합니다.
     if (shouldCountKeystroke({
       key: event.key,
       ctrlKey: event.ctrlKey,
@@ -959,7 +959,7 @@ export default function TypingPractice() {
         setIsRoundComplete(false);
       }
 
-      // ù �Է¿��� Ÿ�̸� ���� (����/����Ű�� ���� ��ȣ���� ����)
+      // 첫 입력에서 타이머 시작 (공백/백스페이스키에는 반응하지 않도록)
       if (!currentWordStartTime) {
         if (event.key === " " || event.key === "Backspace" || event.key === "Delete") return;
         startCurrentWordTracking();
@@ -1046,7 +1046,7 @@ export default function TypingPractice() {
       );
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      setGenerateErrorWithRetry(err instanceof Error ? err.message : "���� ������ �����߽��ϴ�.");
+      setGenerateErrorWithRetry(err instanceof Error ? err.message : "알 수 없는 오류가 발생했습니다.");
       setIsDrawerOpen(true);
       setIsGenerating(false);
       generateAbortRef.current = null;
@@ -1055,7 +1055,7 @@ export default function TypingPractice() {
   };
 
   const handleStartOrStopPractice = async () => {
-    // ���� �߿� Ŭ���ϸ� ������ �����ϰ� ���� �������� ��� ����
+    // 생성 중에 클릭하면 스트림을 중단하고 이미 생성된것만 사용 유지
     if (isGenerating) {
       generateAbortRef.current?.abort();
       generateAbortRef.current = null;
@@ -1065,7 +1065,7 @@ export default function TypingPractice() {
       }
       return;
     }
-    // ī��Ʈ�ٿ� ���̰ų� ���� ���̸� ����
+    // 카운트다운 중이거나 연습 중이면 정지
     if (isPracticing || countdown !== null) {
       haltOngoingPractice({
         cancelSpeech: () => window.speechSynthesis.cancel(),
@@ -1109,35 +1109,35 @@ export default function TypingPractice() {
       });
     } else {
       const parsedWords = inputText.trim().split("/").filter(Boolean);
-      const words = isPositionMode ? (parsedWords.length > 0 ? parsedWords : ["�ڸ�"]) : parsedWords;
+      const words = isPositionMode ? (parsedWords.length > 0 ? parsedWords : ["자리"]) : parsedWords;
       if (words.length > 0) {
-        // ���� ���� ��� �ʱ�ȭ
+        // 결과 관련 상태 초기화
         setRoundCompleteResult(null);
         resetBatchAndReviewState();
-        // ���� ���� �� ���� ����/��� ����
+        // 연습 슬롯 및 연습 모드/상태 설정
         setPracticeSlot(selectedSlot);
         setPracticingMode(mode);
-        // ��ξ� �ݱ�
+        // 드로어 닫기
         setIsDrawerOpen(false);
         if (mode === "longtext" || mode === "sequential" || mode === "random") {
-          // ����ġ��/���� ���: ī��Ʈ�ٿ� �� ����
+          // 보고치라/랜덤 모드: 카운트다운 후 시작
           startCountdown(() => {
             setRoundStartTime(Date.now());
             startPractice(words);
-            // Ÿ���� ĭ�� ��Ŀ��
+            // 타이핑 칸에 포커스
             setTimeout(() => typingTextareaRef.current?.focus(), 50);
           });
         } else if (mode === "sentences") {
-          // ����� ������ ������ API ȣ�� ���� �ٷ� ���
+          // 문장모드 저장된 상태가 있으면 API 호출 없이 바로 복원
           if (savedSentenceStateRef.current) {
             restoreSentenceState();
           } else {
             if (!geminiApiKey) {
-              setGenerateError("���� ��带 ����Ϸ��� API Ű�� �Է��ϼ���.");
+              setGenerateError("문장 모드를 사용하려면 API 키를 입력하세요.");
               setIsDrawerOpen(true);
               return;
             }
-            // ���� ���: AI ���� ��Ʈ���� ���� (��ġ ����)
+            // 초기 시작: AI 스트림 생성 시작 (배치 없음)
             setIsSentenceReview(false);
             setSentences([]);
             setGenerateError(null);
@@ -1152,7 +1152,7 @@ export default function TypingPractice() {
             generateMoreSentences(sentenceWords, targetCount, 0, false, BATCH_SIZE);
           }
         } else {
-          // �ܾ� ���
+          // 단어 모드
           startPractice(words);
           setTimeout(() => wordInputRef.current?.focus(), 50);
         }
@@ -1178,7 +1178,7 @@ export default function TypingPractice() {
   };
 
   const handleLoadPreset = (slot: number) => {
-    // ���� ���� ���� ���� ���� �Ұ� (���� �Ϸ� ���¿����� ���, ������� �׻� ���)
+    // 연습 중이면 슬롯 변경 불가 (라운드 완료 상태에서는 변경, 문장모드는 항상 가능)
     if (mode !== "sentences" && ((isPracticing && !isRoundComplete) || countdown !== null)) {
       return;
     }
@@ -1188,7 +1188,7 @@ export default function TypingPractice() {
     if (saved) {
       updateInputText(saved);
     } else {
-      // �⺻�� ���
+      // 기본값 사용
       switch (slot) {
         case 1:
           updateInputText(savedText1);
@@ -1212,8 +1212,8 @@ export default function TypingPractice() {
     if (!isPracticing) return;
 
     if (mode === "longtext") {
-      // ��۸��: ���� ���� �ڵ����� ���, ���� ǥ�� ���ʿ�
-      // ���� ����� ó��
+      // 긴글모드: 문장 단위 자동처리 없음, 화면 표시 불필요
+      // 음성 출력만 처리
       if (isSoundEnabled && sentences[currentSentenceIndex]) {
         speakText(sentences[currentSentenceIndex]);
       }
@@ -1221,15 +1221,15 @@ export default function TypingPractice() {
     }
 
     if (mode === "sequential" || mode === "random") {
-      // ���� �Ϸ� ���¸� ���� ǥ�� ����
+      // 라운드 완료 상태면 화면 표시 중단
       if (isRoundComplete) return;
 
-      // ī��Ʈ�ٿ� ���̸� ���� ǥ�� �� �� (�� ���� ������ �غ� ��)
+      // 카운트다운 중이면 화면 표시 안 함 (첫 글자 표시전 준비 중)
       if (countdown !== null) return;
 
-      // �Ÿ�ġ�� ���: batchSize��ŭ �ѹ��� ǥ��
+      // 매매치라 모드: batchSize만큼 한번에 표시
       if (isBatchMode) {
-        // ���� ����� ���
+        // 복습 모드일 경우
         if (isReviewMode && currentBatchChars === "") {
           const reviewChars = reviewBatches[reviewIndex];
           if (reviewChars) {
@@ -1242,10 +1242,10 @@ export default function TypingPractice() {
         }
 
         if (!isReviewMode && batchStartIndex < randomizedIndices.length && currentBatchChars === "") {
-          // ���� ��ġ�� ���ڵ� ���
+          // 현재 배치의 글자들 구성
           const endIndex = Math.min(batchStartIndex + batchSize, randomizedIndices.length);
           const batchIndices = randomizedIndices.slice(batchStartIndex, endIndex);
-          // ������ ��ġ�� batchSize���� ������ ���� ���ڷ� ä��
+          // 마지막 배치가 batchSize보다 부족한 경우 랜덤 글자로 채움
           let randomFill = 0;
           if (batchIndices.length < batchSize && batchIndices.length > 0) {
             const shortage = batchSize - batchIndices.length;
@@ -1261,9 +1261,9 @@ export default function TypingPractice() {
             .map(idx => sequentialText[idx])
             .join('');
           setCurrentBatchChars(batchChars);
-          updateTypedWord(""); clearInputElement(); // �� ��ġ ���� �� Ÿ���� ĭ ����
+          updateTypedWord(""); clearInputElement(); // 새 배치 시작 시 타이핑 칸 초기화
 
-          // �Ҹ� ���
+          // 음성 읽기
           if (isSoundEnabled && batchChars) {
             speakText(batchChars, true);
           }
@@ -1271,7 +1271,7 @@ export default function TypingPractice() {
         return;
       }
 
-      // ����ġ��/���� ���: ���� ������ �� ���ھ� ǥ��
+      // 보고치라/랜덤 모드: 타이머마다 한 글자씩 표시
       if (currentDisplayIndex < randomizedIndices.length) {
         sequentialTimerRef.current = setTimeout(() => {
           const nextCharIndex = randomizedIndices[currentDisplayIndex];
@@ -1279,10 +1279,10 @@ export default function TypingPractice() {
 
           incrementDisplayIndex();
 
-          // ������ ���� ������ �Ǵ� ������ ������ �� �Ҹ� ���
+          // 표시된 글자 수가 charsPerRead의 배수이거나 마지막 글자일 때 음성 읽기
           const newDisplayIndex = currentDisplayIndex + 1;
           if (isSoundEnabled && (newDisplayIndex % charsPerRead === 0 || newDisplayIndex === randomizedIndices.length)) {
-            // ������ N����(�Ǵ� ���� ����)�� ��Ƽ� �о���
+            // 최근 N글자(또는 나머지 글자)을 묶어서 읽어줌
             const startIdx = Math.max(0, newDisplayIndex - charsPerRead);
             const textToSpeak = randomizedIndices
               .slice(startIdx, newDisplayIndex)
@@ -1301,7 +1301,7 @@ export default function TypingPractice() {
         }
       };
     } else {
-      // ���� ���: ���� ���
+      // 단어 모드: 단어 읽기
       if (isWordLikeMode && shuffledWords.length > 0) {
         speakText(shuffledWords[currentWordIndex]);
       } else if (mode === "sentences" && sentences.length > 0) {
@@ -1310,17 +1310,17 @@ export default function TypingPractice() {
     }
   }, [isPracticing, mode, currentWordIndex, currentSentenceIndex, currentLetterIndex, speechRate, currentDisplayIndex, randomizedIndices, sequentialSpeed, isSoundEnabled, sequentialText, charsPerRead, isRoundComplete, isBatchMode, batchSize, batchStartIndex, currentBatchChars, isReviewMode, reviewBatches, reviewIndex, countdown, addDisplayedCharIndex, incrementDisplayIndex, isWordLikeMode, sentences, shuffledWords, speakText, updateTypedWord]);
 
-  // �Ÿ�ġ�� ���: Ÿ���� Ȯ�� �� ���� ��ġ�� �̵�
+  // 매매치라 모드: 타이핑 확인 후 다음 배치로 이동
   useEffect(() => {
     if (!isPracticing || !isBatchMode || isRoundComplete) return;
     if (currentBatchChars === "") return;
 
-    // ���� �����ϰ� �� (�������� ���þ ��Ȯ�� ������ ����)
+    // 공백 무시하고 비교 (IME 조합 중 중간에 발생하는 빈칸 처리)
     const typedClean = typedWord.replace(/\s+/g, '');
     const targetClean = currentBatchChars.replace(/\s+/g, '');
 
     if (typedClean.endsWith(targetClean) && targetClean.length > 0) {
-      // Ÿ��/�ڼ� ��� (�Ͻ����� ������ + IME ���� �� �̹ݿ� Ÿ�� ����)
+      // 타수/결과 계산 (일시정지 포함된 누적시간 + IME 조합 중 이반영 타수 포함)
       const currentElapsedMs = currentWordStartTime ? Date.now() - currentWordStartTime : 0;
       const totalElapsedMs = accumulatedElapsedMs + currentElapsedMs;
 
@@ -1332,28 +1332,28 @@ export default function TypingPractice() {
       if (speedMetrics) {
         const { kpm, cpm, elapsedTime } = speedMetrics;
         setLastResult(speedMetrics);
-        // ���� ��尡 �ƴ� ���� ��� ���� (���� ��忡���� ���� �� ��)
+        // 복습 모드가 아닌 경우에만 결과 저장 (복습 모드에서는 결과 안 씀)
         if (!isReviewMode) {
           setAllResults(prev => [...prev, { kpm, cpm, elapsedTime, chars: currentBatchChars, mode }]);
-          // Google Sheets �α�
+          // Google Sheets 로그
           logResult({ mode, kpm, cpm, elapsedTime, chars: currentBatchChars });
         }
       }
-      // �ܿ� �Է� ���� (��� ġȯ �� ���� ����/���Ⱑ ���� ���� Ÿ�̸Ӹ� �������� �ʵ���)
+      // 외부 입력 방지 (글자 전환 후 새로운 입력/리렌더가 이미 있는 타이머를 캔슬하지 않도록)
       isAutoSubmittingRef.current = true;
       setTimeout(() => { isAutoSubmittingRef.current = false; }, 80);
 
-      // ������ �ʱ�ȭ
+      // 카운터 초기화
       composingKeystrokesRef.current = 0;
       setAccumulatedKeystrokes(0);
       setAccumulatedElapsedMs(0);
       resetCurrentWordTracking();
 
-      // ���� ����� ���
+      // 복습 모드일 경우
       if (isReviewMode) {
         const nextReviewIndex = reviewIndex + 1;
         if (nextReviewIndex >= reviewBatches.length) {
-          // ���� �Ϸ� - ��¥ ���� �Ϸ�
+          // 복습 완료 - 진짜 라운드 완료
           setIsReviewMode(false);
           setReviewBatches([]);
           setReviewIndex(0);
@@ -1361,7 +1361,7 @@ export default function TypingPractice() {
           setIsRoundComplete(true);
           setIsDrawerOpen(true);
         } else {
-          // ���� ���� ��ġ
+          // 복습 다음 배치
           setReviewIndex(nextReviewIndex);
           setCurrentBatchChars("");
           updateTypedWord(""); clearInputElement();
@@ -1369,19 +1369,19 @@ export default function TypingPractice() {
         return;
       }
 
-      // ����! ���� ��ġ�� �̵�
+      // 정답\! 다음 배치로 이동
       const nextBatchStart = batchStartIndex + batchSize;
 
       if (nextBatchStart >= randomizedIndices.length) {
-        // ��� ���� �Ϸ� - �ð� ���� �ɸ� 5�� ���� ����
-        // allResults���� �ð� ���� �������� ���� �� ���� 5�� ����
-        // ����: ��� ������ ����� ���� allResults�� �ݿ� �� ��, prev�� ����
+        // 모든 배치 완료 - 시간 많이 걸린 5개 복습 시작
+        // allResults에서 시간 많이 걸린것부터 정렬 후 상위 5개 선택
+        // 주의: 현재 배치의 결과가 아직 allResults에 반영 안 된 상태, prev를 사용
         setAllResults(prev => {
           const modeOnly = prev.filter(r => r.mode === mode);
           const sorted = [...modeOnly].sort((a, b) => b.elapsedTime - a.elapsedTime);
           const top5 = sorted.slice(0, 5).map(r => r.chars).filter(c => c.length > 0);
           if (top5.length > 0) {
-            // setTimeout���� ���� ������Ʈ �и� (React batching �̽� ����)
+            // setTimeout으로 상태 업데이트 분리 (React batching 이슈 회피)
             setTimeout(() => {
               setReviewBatches(top5);
               setReviewIndex(0);
@@ -1391,7 +1391,7 @@ export default function TypingPractice() {
               updateTypedWord(""); clearInputElement();
             }, 0);
           } else {
-            // ����� ������ �ٷ� ���� �Ϸ�
+            // 복습할 배치가 없으면 바로 라운드 완료
             setTimeout(() => {
               setIsRoundComplete(true);
               setIsDrawerOpen(true);
@@ -1400,7 +1400,7 @@ export default function TypingPractice() {
           return prev;
         });
       } else {
-        // ���� ��ġ �غ�
+        // 다음 배치 준비
         setBatchStartIndex(nextBatchStart);
         setCurrentBatchChars("");
         updateTypedWord(""); clearInputElement();
@@ -1408,7 +1408,7 @@ export default function TypingPractice() {
     }
   }, [typedWord, currentBatchChars, isPracticing, isBatchMode, batchStartIndex, batchSize, randomizedIndices.length, isRoundComplete, currentWordStartTime, currentWordKeystrokes, accumulatedKeystrokes, accumulatedElapsedMs, isReviewMode, reviewIndex, reviewBatches, mode, resetCurrentWordTracking, updateTypedWord]);
 
-  // ���� ���� �� ��� �ʱ�ȭ
+  // 연습 정지 시 결과 초기화
   useEffect(() => {
     if (!isPracticing && countdown === null) {
       setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
@@ -1416,7 +1416,7 @@ export default function TypingPractice() {
     }
   }, [isPracticing, countdown]);
 
-  // �ǽð� ��� �ð� ������Ʈ
+  // 실시간 경과 시간 업데이트
   useEffect(() => {
     if (!isPracticing || countdown !== null || isRoundComplete) {
       return;
@@ -1427,7 +1427,7 @@ export default function TypingPractice() {
       if (currentWordStartTime) {
         const currentMs = Date.now() - currentWordStartTime;
         const totalMs = accumulatedElapsedMs + currentMs;
-        // DOM ���� ������Ʈ (React ������ ���� Ÿ�̸� ǥ��)
+        // DOM 직접 업데이트 (React 리렌더 없이 타이머 표시)
         if (elapsedTimerRef.current) {
           elapsedTimerRef.current.textContent = `${formatElapsedTime(totalMs)}`;
         }
@@ -1439,7 +1439,7 @@ export default function TypingPractice() {
     return () => cancelAnimationFrame(rafId);
   }, [isPracticing, countdown, isRoundComplete, currentWordStartTime, accumulatedElapsedMs]);
 
-  // ���� ǥ�� ���� �ڵ� ��ũ�� (�� ���ڰ� ���� �� �Ʒ���)
+  // 표시 영역 자동 스크롤 (새 글자가 추가될 때 아래로)
   useEffect(() => {
     if (displayAreaRef.current && isPracticing && !isRoundComplete) {
       displayAreaRef.current.scrollTop = displayAreaRef.current.scrollHeight;
@@ -1447,7 +1447,7 @@ export default function TypingPractice() {
   }, [currentDisplayIndex, isPracticing, isRoundComplete]);
 
 
-  // ESC Ű�� ���� ����/����
+  // ESC 키로 연습 시작/정지
   const handleStartOrStopRef = useRef(handleStartOrStopPractice);
   handleStartOrStopRef.current = handleStartOrStopPractice;
 
@@ -1462,7 +1462,7 @@ export default function TypingPractice() {
     return () => window.removeEventListener("keydown", handleEsc);
   }, [mode, isSoundEnabled, toggleSound]);
 
-  // ���� ����� ����� ���͸�
+  // 현재 모드에서 사용할 결과만 필터링
   const modeResults = useMemo(() => pickModeResults(allResults, mode), [allResults, mode]);
   const sentenceDisplayResults = useMemo(
     () => (isSentenceReview && modeResults.length === 0 ? preReviewResults : modeResults),
@@ -1472,7 +1472,7 @@ export default function TypingPractice() {
     () =>
       positionEnabledStages.length === 1
         ? (POSITION_STAGE_OPTIONS.find((v) => v.key === positionEnabledStages[0])?.label ?? positionEnabledStages[0])
-        : `${positionEnabledStages.length}�ܰ� ȥ��`,
+        : `${positionEnabledStages.length}단계 혼합`,
     [positionEnabledStages]
   );
   const sentenceProgressLabel = useMemo(() => {
@@ -1494,7 +1494,7 @@ export default function TypingPractice() {
     return effectiveTotal > 0 ? `${progressCount}/${effectiveTotal}` : `${progressCount}`;
   }, [isPracticing, isSentenceReview, preReviewSentenceStateRef, totalCount, sentences.length, progressCount, roundCompleteResult]);
 
-  // ��� ��� (JSX���� ���� �� �����ǹǷ� useMemo�� 1ȸ�� ���)
+  // 평균 결과 (JSX에서 여러 번 쓰일 수 있으므로 useMemo로 1회만 계산)
   const averageResult = useMemo(() => {
     const stats = computeSessionStats(modeResults);
     if (!stats) return { avgKpm: 0, avgCpm: 0, avgTime: 0 };
@@ -1505,16 +1505,16 @@ export default function TypingPractice() {
     };
   }, [modeResults]);
 
-  // ��ĭ�� ǥ�õ� ����
+  // 화면에 표시될 글자
   const displayedText = useMemo((): string => {
     if (isBatchMode) {
       return currentBatchChars;
     }
-    // ����ġ��/��� ���: �ε��� ������� ǥ�� (����� ����, ����ġ��� ����)
+    // 보고치라/랜덤 모드: 인덱스 순서대로 표시 (랜덤은 섞임, 보고치라는 순서)
     return randomizedIndices.slice(0, currentDisplayIndex).map(index => sequentialText[index]).join('');
   }, [isBatchMode, currentBatchChars, randomizedIndices, currentDisplayIndex, sequentialText]);
 
-  // Ÿ������ ��ġ������ ���� (������ 10~1���� ��Ī���� ã��)
+  // 타이핑과 원본텍스트 맞춤 계산 (타이핑의 10~1글자 역방향 매칭으로 찾기)
   const scoringOriginalText = useMemo((): string => {
     if (!isRoundComplete || typedWord.length === 0) return '';
 
@@ -1523,25 +1523,25 @@ export default function TypingPractice() {
 
     if (typedClean.length === 0) return '';
 
-    // ������ 10~1���ڷ� �������� ��ġ ã��
+    // 타이핑의 10~1글자로 역방향 위치 찾기
     for (let len = Math.min(10, typedClean.length); len >= 1; len--) {
       const lastChars = typedClean.slice(-len);
 
-      // �������� �ڿ������� �˻�
+      // 역방향으로 부분문자열 검사
       for (let i = displayedClean.length - len; i >= 0; i--) {
         const window = displayedClean.slice(i, i + len);
         if (window === lastChars) {
-          // �ش� ��ġ������ ���� ��ȯ
+          // 해당 위치까지의 원본을 반환
           return displayedClean.slice(0, i + len);
         }
       }
     }
 
-    // ã�� ���ϸ� ��ü ���� ��ȯ
+    // 찾지 못하면 전체 원본 반환
     return displayedClean;
   }, [isRoundComplete, displayedText, typedWord]);
 
-  // ���� ��ŷ (�Ͻ�����/�Ϸ� �ÿ���) - Ÿ������ ��ġ������ ��
+  // 전체 마킹 (일시정지/완료 시에만) - 타이핑과 원본텍스트 맞춤 기준
   const markedText = useMemo((): FullMarkedChar[] => {
     if ((mode !== "sequential" && mode !== "longtext") || !isRoundComplete || typedWord.length === 0) {
       return [];
@@ -1549,7 +1549,7 @@ export default function TypingPractice() {
     return getFullMarkedText(scoringOriginalText, typedWord);
   }, [mode, isRoundComplete, scoringOriginalText, typedWord]);
 
-  // ä�� ��� (�Ͻ�����/�Ϸ� �ÿ���) - Ÿ������ ��ġ������ ��
+  // 채점 결과 (일시정지/완료 시에만) - 타이핑과 원본텍스트 맞춤 기준
   const scoringResult = useMemo((): ScoringResult | null => {
     if ((mode !== "sequential" && mode !== "longtext") || !isRoundComplete || typedWord.length === 0) {
       return null;
@@ -1557,7 +1557,7 @@ export default function TypingPractice() {
     return analyzeScoring(scoringOriginalText, typedWord);
   }, [mode, isRoundComplete, scoringOriginalText, typedWord]);
 
-  // ��ĭ (����) ���� ��ŷ (�Ͻ�����/�Ϸ� �ÿ���) - Ÿ������ ��ġ������ ��
+  // 원본 (위칸) 오류 마킹 (일시정지/완료 시에만) - 타이핑과 원본텍스트 맞춤 기준
   const markedOriginalText = useMemo((): MarkedChar[] => {
     if ((mode !== "sequential" && mode !== "longtext") || !isRoundComplete || !scoringResult) {
       return [];
@@ -1565,11 +1565,11 @@ export default function TypingPractice() {
     return getMarkedText(scoringOriginalText, scoringResult);
   }, [mode, isRoundComplete, scoringOriginalText, scoringResult]);
 
-  // ���尡 ��¥ �Ϸ����� (������ 10~1���� ��ġ Ȯ��)
+  // 라운드가 진짜 완료됐는지 (타이핑의 10~1글자 위치 확인)
   const isFullyComplete = useMemo((): boolean => {
     if (!isRoundComplete) return false;
 
-    // �Ÿ�ġ�� ���: �������� ������ ������ ���� ���� ����
+    // 매매치라 모드: 배치복습까지 완료해야 진정한 라운드 완료
     if (isBatchMode) {
       return isBatchReviewDone;
     }
@@ -1577,10 +1577,10 @@ export default function TypingPractice() {
     const displayedClean = displayedText.replace(/\s+/g, '');
     const typedClean = typedWord.replace(/\s+/g, '');
 
-    // �ּ� ���� üũ (������ 50% �̻��� �ľ� ��)
+    // 최소 길이 체크 (원본의 50% 이상을 타이핑해야 함)
     if (typedClean.length < displayedClean.length * 0.5) return false;
 
-    // ������ 10~1���� �� �ϳ��� ��ġ�ϸ� �Ϸ�
+    // 타이핑의 10~1글자 중 하나라도 일치하면 완료
     for (let len = Math.min(10, displayedClean.length); len >= 1; len--) {
       const originalEnd = displayedClean.slice(-len);
       const typedEnd = typedClean.slice(-len);
@@ -1591,7 +1591,7 @@ export default function TypingPractice() {
     return false;
   }, [isRoundComplete, displayedText, typedWord, isBatchMode, isBatchReviewDone]);
 
-  // ���� �Ϸ� �� ��ξ� ���� + �Ϸ� Ƚ�� ��� ����
+  // 라운드 완료 시 드로어 열기 + 완료 횟수 누적 저장
   useEffect(() => {
     if (isFullyComplete) {
       setIsDrawerOpen(true);
@@ -1614,14 +1614,14 @@ export default function TypingPractice() {
       totalCount,
     });
 
-  // ������ ���� ���� (�ٸ� ���� ��ȯ ��)
+  // 문장모드 상태 저장 (다른 모드 전환 시)
   const saveSentenceState = () => {
     if (mode === "sentences" && sentences.length > 0) {
       savedSentenceStateRef.current = createCurrentSentenceState();
     }
   };
 
-  // ��۸�� ���� ���� (�ٸ� ���� ��ȯ ��)
+  // 긴글모드 상태 저장 (다른 모드 전환 시)
   const saveLongtextState = () => {
     if (mode === "longtext" && sentences.length > 0) {
       savedLongtextStateRef.current = createSavedLongtextState({
@@ -1638,7 +1638,7 @@ export default function TypingPractice() {
   };
 
 
-  // ��ġ/���� ���� �ʱ�ȭ
+  // 배치/복습 상태 초기화
   const resetBatchAndReviewState = () => {
     setBatchStartIndex(0);
     setCurrentBatchChars("");
@@ -1648,7 +1648,7 @@ export default function TypingPractice() {
     setIsBatchReviewDone(false);
   };
 
-  // ��� ��ȯ �� ���� (��� ��庰 ���� ���� �ʱ�ȭ)
+  // 모드 전환 시 정리 (모드 공통 연습 상태 초기화)
   const cleanupForModeSwitch = () => {
     setRoundCompleteResult(null);
     setLastResult({ kpm: 0, cpm: 0, elapsedTime: 0 });
@@ -1683,7 +1683,7 @@ export default function TypingPractice() {
     setTimeout(() => wordInputRef.current?.focus(), 50);
   };
 
-  // ������ ���� ���� (������� ���ƿ� ��)
+  // 문장모드 상태 복원 (문장모드로 돌아올 때)
   const restoreSentenceState = () => {
     const saved = savedSentenceStateRef.current;
     if (saved) {
@@ -1693,7 +1693,7 @@ export default function TypingPractice() {
     }
   };
 
-  // ��۸�� ���� ���� (��۸��� ���ƿ� ��)
+  // 긴글모드 상태 복원 (긴글모드로 돌아올 때)
   const restoreLongtextState = () => {
     const saved = savedLongtextStateRef.current;
     if (saved) {

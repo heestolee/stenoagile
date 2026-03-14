@@ -94,7 +94,6 @@ export default function WordSentenceControlPanel({
             초기화
           </button>
         )}
-        {todayCompletedRounds > 0 && <span className="text-sm text-gray-600 font-medium">오늘 {todayCompletedRounds} 문장 완료</span>}
         {mode === "sentences" && generateError && (
           <div className="flex flex-col">
             <span className="text-sm text-red-500 font-medium">{generateErrorMessage}</span>
@@ -210,7 +209,7 @@ export default function WordSentenceControlPanel({
                 }`}
                 onClick={() => onSelectModel(model.id)}
               >
-                {model.label} ({model.estimatedSentences})
+                {model.label}
               </button>
             ))}
           </div>

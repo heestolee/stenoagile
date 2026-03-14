@@ -15,7 +15,7 @@ export async function generateSentencesStream(
   const response = await fetch("/api/generate-sentences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ words, count, apiKey, style, preferredModel, previousSentences, wordsPerSentence }),
+    body: JSON.stringify({ words, count, apiKey, style, preferredModel, wordsPerSentence }),
     signal,
   });
 

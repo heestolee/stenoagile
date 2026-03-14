@@ -1,20 +1,20 @@
 export const GEMINI_MODEL_NAMES = [
   "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-preview-09-2025",
   "gemini-2.5-flash-lite",
   "gemini-2.5-flash-lite-preview-09-2025",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
 ] as const;
 
 export const GEMINI_MODEL_OPTIONS = [
   { id: "auto", label: "자동 선택", estimatedSentences: "성능순" },
-  { id: "gemini-3-flash-preview", label: "3 Flash Preview", estimatedSentences: "~100개" },
-  { id: "gemini-2.5-flash", label: "2.5 Flash", estimatedSentences: "~600-1300개" },
-  { id: "gemini-2.5-flash-lite", label: "2.5 Flash Lite", estimatedSentences: "~600-1300개" },
-  { id: "gemini-2.0-flash", label: "2.0 Flash", estimatedSentences: "~80-160개" },
-  { id: "gemini-2.0-flash-lite", label: "2.0 Flash Lite", estimatedSentences: "~80-160개" },
+  { id: "gemini-3-flash-preview", label: "3 Flash Preview", estimatedSentences: "" },
+  { id: "gemini-3.1-flash-lite-preview", label: "3.1 Flash Lite Preview", estimatedSentences: "" },
+  { id: "gemini-2.5-pro", label: "2.5 Pro", estimatedSentences: "" },
+  { id: "gemini-2.5-flash", label: "2.5 Flash", estimatedSentences: "" },
+  { id: "gemini-2.5-flash-lite", label: "2.5 Flash Lite", estimatedSentences: "" },
 ] as const;
 
 export const SENTENCE_STYLES = [
