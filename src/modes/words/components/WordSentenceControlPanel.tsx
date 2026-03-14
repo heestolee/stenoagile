@@ -170,7 +170,7 @@ export default function WordSentenceControlPanel({
                 }`}
                 onClick={() => onSelectModel(model.id)}
               >
-                {model.label} ({model.estimatedSentences})
+                {model.label}
               </button>
             ))}
           </div>

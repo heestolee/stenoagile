@@ -2,14 +2,15 @@ import type { Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
 
 // Gemini 무료 모델 목록 (성능 좋은 순서, RPD 소진 시 다음 모델로 자동 폴백)
+// gemini-2.0-flash, gemini-2.0-flash-lite는 2026년 3월 3일 은퇴 → 제거
 const GEMINI_MODELS = [
   { id: "gemini-3-flash-preview", supportsThinking: true, maxOutput: 65536 },
+  { id: "gemini-3.1-flash-lite-preview", supportsThinking: true, maxOutput: 65536 },
+  { id: "gemini-2.5-pro", supportsThinking: true, maxOutput: 65536 },
   { id: "gemini-2.5-flash", supportsThinking: true, maxOutput: 65536 },
   { id: "gemini-2.5-flash-preview-09-2025", supportsThinking: true, maxOutput: 65536 },
   { id: "gemini-2.5-flash-lite", supportsThinking: true, maxOutput: 65536 },
   { id: "gemini-2.5-flash-lite-preview-09-2025", supportsThinking: true, maxOutput: 65536 },
-  { id: "gemini-2.0-flash", supportsThinking: false, maxOutput: 8192 },
-  { id: "gemini-2.0-flash-lite", supportsThinking: false, maxOutput: 8192 },
 ];
 
 // 마지막으로 성공한 모델 인덱스 기억
@@ -26,54 +27,42 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-// 누적 텍스트에서 완성된 문장을 하나씩 추출
+// 누적 텍스트에서 완성된 문장을 하나씩 추출 — 구두점 기반 파서
+// 문장 끝 구두점(.!?。)을 기준으로 분리, 긴 문장은 쉼표로 추가 분리
 function extractSentences(accumulated: string): { sentences: string[]; remaining: string } {
   const sentences: string[] = [];
-  let text = accumulated;
+  const pattern = /[^.!?。…\n]+[.!?。…]+/g;
 
-  const arrStart = text.indexOf("[");
-  if (arrStart === -1) return { sentences: [], remaining: text };
-  text = text.slice(arrStart + 1);
-
-  while (true) {
-    const quoteStart = text.indexOf('"');
-    if (quoteStart === -1) break;
-
-    let i = quoteStart + 1;
-    let found = false;
-    while (i < text.length) {
-      if (text[i] === '\\') {
-        i += 2;
-        continue;
+  let lastEnd = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(accumulated)) !== null) {
+    const raw = match[0].trim().replace(/\s+([.!?,;:·…])/g, '$1');
+    const isMeta = /중략|생략|형식\s*유지|\.{3}\s*\(/.test(raw);
+    if (isMeta) {
+      lastEnd = match.index + match[0].length;
+      continue;
+    }
+    // 60자 초과 문장은 쉼표 기준으로 추가 분리
+    if (raw.length > 60) {
+      const parts = raw.split(/,\s*/);
+      let buf = "";
+      for (const part of parts) {
+        const candidate = buf ? buf + ", " + part : part;
+        if (candidate.length > 60 && buf.length >= 15) {
+          sentences.push(buf);
+          buf = part;
+        } else {
+          buf = candidate;
+        }
       }
-      if (text[i] === '"') {
-        found = true;
-        break;
-      }
-      i++;
+      if (buf.length >= 15) sentences.push(buf);
+    } else if (raw.length >= 15) {
+      sentences.push(raw);
     }
-
-    if (!found) break;
-
-    const raw = text.slice(quoteStart + 1, i).replace(/\\"/g, '"').replace(/\\n/g, '\n');
-    // 번호추적 프롬프트의 "1. ", "23. " 등 접두어 제거
-    // 구두점 앞 불필요한 공백 제거 (예: "했습니다 ." → "했습니다.")
-    const sentence = raw.replace(/^\d+\.\s*/, '').replace(/\s+([.!?,;:·…])/g, '$1');
-    const isMeta = /중략|생략|형식\s*유지|\.{3}\s*\(/.test(sentence);
-    if (sentence.trim().length > 0 && !isMeta) sentences.push(sentence);
-    text = text.slice(i + 1);
-
-    const nextComma = text.indexOf(",");
-    const nextBracket = text.indexOf("]");
-    if (nextBracket !== -1 && (nextComma === -1 || nextBracket < nextComma)) {
-      break;
-    }
-    if (nextComma !== -1) {
-      text = text.slice(nextComma + 1);
-    }
+    lastEnd = match.index + match[0].length;
   }
 
-  return { sentences, remaining: text };
+  return { sentences, remaining: accumulated.slice(lastEnd) };
 }
 
 type TryModelResult =
@@ -172,13 +161,12 @@ export function claudePlugin(): Plugin {
           const body = await readBody(req);
 
           try {
-            const { words, count, apiKey, style, preferredModel, previousSentences, wordsPerSentence } = JSON.parse(body) as {
+            const { words, apiKey, style, preferredModel, wordsPerSentence } = JSON.parse(body) as {
               words: string[];
-              count: number;
+              count?: number;
               apiKey: string;
               style?: string;
               preferredModel?: string;
-              previousSentences?: string[];
               wordsPerSentence?: number;
             };
 
@@ -200,36 +188,6 @@ export function claudePlugin(): Plugin {
               ? "자유로운 주제로 최대한 다양한 단어와 표현을 사용하여"
               : `단어 풀: ${words.join(", ")}\n매 문장마다 위 단어 중 ${perSentence}개를 다르게 골라 자연스럽게 활용하여 (매 문장마다 다른 조합을 선택할 것)`;
 
-            // 이전 문장이 있으면 중복 방지 지시 추가 (최근 100개만 전송)
-            let avoidInstruction = "";
-            if (previousSentences && previousSentences.length > 0) {
-              const recentSentences = previousSentences.slice(-100);
-              avoidInstruction = `\n\n[절대 무시하지 마세요 - 중복 방지 목록]\n아래는 이전에 생성된 ${recentSentences.length}개의 문장입니다. 이 목록이 아무리 길어도 반드시 전부 확인하고, 아래 문장과 비슷한 문장, 같은 주제, 같은 문장 구조, 같은 단어 조합을 절대 반복하지 마세요. 완전히 새로운 주제, 새로운 구조, 새로운 어휘로 작성하세요:\n${recentSentences.map(s => `- ${s}`).join("\n")}`;
-            }
-
-            const prompt = `정확히 ${count}개의 한국어 문장을 생성하세요.
-${wordInstruction}
-각 문장 20~50자, ${styleInstruction}.
-
-다양성 규칙 (매우 중요):
-- 문장 구조를 매번 바꾸세요: 평서문, 의문문, 감탄문, 명령문, 인용문, 조건문 등을 섞으세요.
-- 주어-서술어 패턴을 반복하지 마세요. 주어 생략, 도치, 피동/사동, 접속문, 부사구 시작 등 다양한 구조를 사용하세요.
-- 같은 어미(-습니다, -했다, -한다 등)가 연속으로 반복되지 않게 하세요.
-- 문장의 분위기와 톤도 다양하게: 설명, 묘사, 감정, 사실 전달, 비유, 대화 등을 섞으세요.
-- 같은 단어나 표현이 반복되지 않도록 하세요.
-- 이 배치 안에서도 문장끼리 비슷하면 안 됩니다. 각 문장은 앞에 나온 문장과 주제·구조·어휘가 모두 달라야 합니다.
-- 문장의 첫 어절과 마지막 서술어가 다른 문장과 겹치지 않게 하세요.${avoidInstruction}
-
-절대 금지 (위반 시 실패):
-- "...", "(중략)", "(생략)", "(형식 유지)", "(이하 생략)" 등 어떤 생략/축약 표시도 쓰지 마세요.
-- 중간에 멈추거나 요약하거나 건너뛰지 마세요.
-- 메타 주석이나 설명을 문장 안에 넣지 마세요.
-
-중요: 각 문장 앞에 번호를 붙여서 진행 상황을 추적하세요.
-형식: ["1. 문장내용", "2. 문장내용", ..., "${count}. 문장내용"]
-반드시 1번부터 ${count}번까지 실제 문장 ${count}개를 전부 작성하세요. ${count}번이 될 때까지 절대 멈추지 마세요.
-JSON 배열로만 응답하세요.`;
-
             const https = await import("https");
 
             let succeeded = false;
@@ -244,6 +202,28 @@ JSON 배열로만 응답하세요.`;
 
             for (let mi = startIndex; mi < GEMINI_MODELS.length; mi++) {
               const model = GEMINI_MODELS[mi];
+
+              // 모델의 maxOutput 토큰 기준으로 목표 글자수 계산
+              // 한국어 1토큰 ≈ 2.8자, 85% 여유 적용
+              const targetChars = Math.floor(model.maxOutput * 2.8 * 0.85).toLocaleString("ko-KR");
+
+              const prompt = `다양한 주제로 한국어 글을 ${targetChars}자 이상 작성하세요.
+${wordInstruction}
+문체: ${styleInstruction}.
+
+규칙:
+- 정치, 경제, 사회, 문화, 과학, 스포츠, 일상, 법률, 의료, 환경 등 다양한 분야를 넘나들며 작성하세요.
+- 문장 구조를 다양하게: 평서문, 의문문, 감탄문, 명령문, 조건문 등을 섞으세요.
+- 각 문장은 20~60자 내외로 작성하세요.
+- 반드시 ${targetChars}자를 채울 때까지 멈추지 마세요.
+
+절대 금지:
+- 제목, 소제목, 번호, 목록 기호 등 형식 요소
+- "(중략)", "(생략)" 등 축약 표시
+- 메타 주석이나 설명
+
+순수 텍스트로만 응답하세요.`;
+
               const generationConfig: Record<string, unknown> = {
                 maxOutputTokens: model.maxOutput,
                 temperature: isRandomMode ? 1.5 : 1.4,
@@ -318,20 +298,19 @@ JSON 배열로만 응답하세요.`;
                     }
 
                     const { sentences } = extractSentences(accumulated);
-                    const limit = Math.min(sentences.length, count);
-                    for (let i = sentSoFar; i < limit; i++) {
+                    for (let i = sentSoFar; i < sentences.length; i++) {
                       res.write(`data: ${JSON.stringify({ sentence: sentences[i], index: i })}\n\n`);
                     }
                     sentSoFar = sentences.length;
                   });
 
                   apiRes.on("end", () => {
-                    const { sentences } = extractSentences(accumulated);
-                    const limit = Math.min(sentences.length, count);
-                    for (let i = sentSoFar; i < limit; i++) {
+                    // 마지막 줄 — 줄바꿈 없이 끝난 경우 남은 텍스트도 처리
+                    const { sentences } = extractSentences(accumulated + "\n");
+                    for (let i = sentSoFar; i < sentences.length; i++) {
                       res.write(`data: ${JSON.stringify({ sentence: sentences[i], index: i })}\n\n`);
                     }
-                    res.write(`data: ${JSON.stringify({ done: true, total: limit, model: result.model })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ done: true, total: sentences.length, model: result.model })}\n\n`);
                     res.end();
                     streamResolve();
                   });

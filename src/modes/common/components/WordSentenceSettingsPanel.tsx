@@ -150,13 +150,11 @@ export default function WordSentenceSettingsPanel({
             <label className="text-xs whitespace-nowrap">복습 주기</label>
             <input
               type="number"
-              min={10}
-              max={200}
-              step={5}
+              step={10}
               value={sentenceReviewWindow}
               onChange={(e) => {
                 const val = parseInt(e.target.value);
-                if (!isNaN(val) && val >= 10 && val <= 200) onSentenceReviewWindowChange(val);
+                if (!isNaN(val) && val >= 1) onSentenceReviewWindowChange(val);
               }}
               className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
