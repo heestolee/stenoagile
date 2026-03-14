@@ -9,7 +9,7 @@ export async function generateSentencesStream(
   onModel?: (model: string) => void,
   signal?: AbortSignal,
   preferredModel?: string,
-  previousSentences?: string[],
+  _previousSentences?: string[],
   wordsPerSentence?: number,
 ): Promise<void> {
   const response = await fetch("/api/generate-sentences", {

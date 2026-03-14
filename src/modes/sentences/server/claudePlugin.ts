@@ -161,9 +161,9 @@ export function claudePlugin(): Plugin {
           const body = await readBody(req);
 
           try {
-            const { words, count, apiKey, style, preferredModel, wordsPerSentence } = JSON.parse(body) as {
+            const { words, apiKey, style, preferredModel, wordsPerSentence } = JSON.parse(body) as {
               words: string[];
-              count: number;
+              count?: number;
               apiKey: string;
               style?: string;
               preferredModel?: string;

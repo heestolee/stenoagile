@@ -43,7 +43,7 @@ export default function WordSentenceControlPanel({
   isGenerating,
   generatedCount,
   isPracticing,
-  todayCompletedRounds,
+  todayCompletedRounds: _todayCompletedRounds,
   generateError,
   generateErrorMessage,
   showRawGenerateError,
