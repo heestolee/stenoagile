@@ -29,6 +29,7 @@ export async function generateSentencesStream(
 
   const decoder = new TextDecoder();
   let buffer = "";
+  let doneCalled = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -64,11 +65,18 @@ export async function generateSentencesStream(
           onSentence(data.sentence, data.index);
         }
         if (data.done && data.total !== undefined) {
+          doneCalled = true;
           try { await onDone(data.total); } catch { /* onDone 에러 무시 */ }
         }
       } catch {
         // 파싱 실패 무시
       }
     }
+  }
+
+  // 스트림이 done 이벤트 없이 끊긴 경우 (예: Netlify 26초 타임아웃)
+  // onDone을 호출해 "생성 중" 상태를 해제
+  if (!doneCalled) {
+    try { await onDone(0); } catch { /* 무시 */ }
   }
 }
