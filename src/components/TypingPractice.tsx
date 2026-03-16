@@ -1505,6 +1505,14 @@ export default function TypingPractice() {
     };
   }, [modeResults]);
 
+  // 최근 50개 평균 결과
+  const recentAverageResult = useMemo(() => {
+    const recent = modeResults.slice(-50);
+    const stats = computeSessionStats(recent);
+    if (!stats) return { avgKpm: 0, avgCpm: 0 };
+    return { avgKpm: stats.avgKpmRounded, avgCpm: stats.avgCpmRounded };
+  }, [modeResults]);
+
   // 화면에 표시될 글자
   const displayedText = useMemo((): string => {
     if (isBatchMode) {
@@ -2048,6 +2056,7 @@ export default function TypingPractice() {
     lastResult,
     modeResultsLength: modeResults.length,
     averageResult,
+    recentAverageResult,
     elapsedTimerRef,
     preReviewProgress: preReviewSentenceStateRef.current?.progressCount ?? 0,
     preReviewTotal: preReviewSentenceStateRef.current?.totalCount ?? 0,

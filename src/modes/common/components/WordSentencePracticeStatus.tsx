@@ -10,6 +10,7 @@ type WordSentencePracticeStatusProps = {
   lastResult: { kpm: number; cpm: number };
   modeResultsLength: number;
   averageResult: { avgKpm: number; avgCpm: number };
+  recentAverageResult: { avgKpm: number; avgCpm: number };
   elapsedTimerRef: RefObject<HTMLSpanElement | null>;
   preReviewProgress: number;
   preReviewTotal: number;
@@ -25,6 +26,7 @@ export default function WordSentencePracticeStatus({
   lastResult,
   modeResultsLength,
   averageResult,
+  recentAverageResult,
   elapsedTimerRef,
   preReviewProgress,
   preReviewTotal,
@@ -47,9 +49,15 @@ export default function WordSentencePracticeStatus({
           <span ref={elapsedTimerRef} className="text-orange-600">{displayElapsedTimeLabel}</span>
         </div>
         {mode !== "words" && modeResultsLength > 0 && modeResultsLength % 50 === 0 && (
-          <div className="flex items-center space-x-4 text-xs text-gray-600">
-            <span>평균 타수: {averageResult.avgKpm}/분</span>
-            <span>평균 자수: {averageResult.avgCpm}/분</span>
+          <div className="flex flex-col space-y-0.5 text-xs text-gray-600">
+            <div className="flex items-center space-x-4">
+              <span>전체 평균(1~{modeResultsLength}): 타수 {averageResult.avgKpm}/분 자수 {averageResult.avgCpm}/분</span>
+            </div>
+            {modeResultsLength > 50 && (
+              <div className="flex items-center space-x-4">
+                <span>최근 50 평균({modeResultsLength - 49}~{modeResultsLength}): 타수 {recentAverageResult.avgKpm}/분 자수 {recentAverageResult.avgCpm}/분</span>
+              </div>
+            )}
           </div>
         )}
       </div>
