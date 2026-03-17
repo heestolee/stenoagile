@@ -14,7 +14,7 @@ const GEMINI_MODELS = [
 
 // 누적 텍스트에서 완성된 문장을 하나씩 추출 — 구두점 기반 파서
 // 문장 끝 구두점(.!?。)을 기준으로 분리, 긴 문장은 쉼표로 추가 분리
-function extractSentences(accumulated: string): { sentences: string[]; remaining: string } {
+function extractSentences(accumulated: string, minLen = 15, maxLen = 60): { sentences: string[]; remaining: string } {
   const sentences: string[] = [];
   const pattern = /[^.!?。…\n]+[.!?。…]+/g;
 
@@ -27,21 +27,21 @@ function extractSentences(accumulated: string): { sentences: string[]; remaining
       lastEnd = match.index + match[0].length;
       continue;
     }
-    // 60자 초과 문장은 쉼표 기준으로 추가 분리
-    if (raw.length > 60) {
+    // maxLen 초과 문장은 쉼표 기준으로 추가 분리
+    if (raw.length > maxLen) {
       const parts = raw.split(/,\s*/);
       let buf = "";
       for (const part of parts) {
         const candidate = buf ? buf + ", " + part : part;
-        if (candidate.length > 60 && buf.length >= 15) {
+        if (candidate.length > maxLen && buf.length >= minLen) {
           sentences.push(buf);
           buf = part;
         } else {
           buf = candidate;
         }
       }
-      if (buf.length >= 15) sentences.push(buf);
-    } else if (raw.length >= 15) {
+      if (buf.length >= minLen) sentences.push(buf);
+    } else if (raw.length >= minLen) {
       sentences.push(raw);
     }
     lastEnd = match.index + match[0].length;
@@ -110,6 +110,8 @@ export default async function handler(request: Request): Promise<Response> {
     style?: string;
     preferredModel?: string;
     wordsPerSentence?: number;
+    sentenceMinLength?: number;
+    sentenceMaxLength?: number;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -126,7 +128,12 @@ export default async function handler(request: Request): Promise<Response> {
     style,
     preferredModel,
     wordsPerSentence,
+    sentenceMinLength,
+    sentenceMaxLength,
   } = body;
+
+  const minLen = sentenceMinLength ?? 15;
+  const maxLen = sentenceMaxLength ?? 60;
 
   if (!apiKey) {
     return new Response(JSON.stringify({ error: "API 키가 필요합니다." }), {
@@ -155,7 +162,7 @@ ${wordInstruction}
 규칙:
 - 정치, 경제, 사회, 문화, 과학, 스포츠, 일상, 법률, 의료, 환경 등 다양한 분야를 넘나들며 작성하세요.
 - 문장 구조를 다양하게: 평서문, 의문문, 감탄문, 명령문, 조건문 등을 섞으세요.
-- 각 문장은 20~60자 내외로 작성하세요.
+- 각 문장은 ${minLen}~${maxLen}자 내외로 작성하세요.
 - 반드시 ${targetChars}자를 채울 때까지 멈추지 마세요.
 
 절대 금지:
@@ -276,7 +283,7 @@ ${wordInstruction}
                 }
               }
 
-              const { sentences } = extractSentences(accumulated);
+              const { sentences } = extractSentences(accumulated, minLen, maxLen);
               for (let i = sentSoFar; i < sentences.length; i++) {
                 await writeSSE({ sentence: sentences[i], index: i });
               }
@@ -284,7 +291,7 @@ ${wordInstruction}
             }
 
             // 스트림 종료 후 마지막 줄 처리 (줄바꿈 없이 끝난 경우 포함)
-            const { sentences } = extractSentences(accumulated + "\n");
+            const { sentences } = extractSentences(accumulated + "\n", minLen, maxLen);
             for (let i = sentSoFar; i < sentences.length; i++) {
               await writeSSE({ sentence: sentences[i], index: i });
             }

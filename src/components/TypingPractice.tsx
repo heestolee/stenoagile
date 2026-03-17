@@ -241,6 +241,8 @@ export default function TypingPractice() {
   const [longTextLength, setLongTextLength] = useState(300);
   const [sentenceReviewWindow, setSentenceReviewWindow] = useState(50);
   const [wordsPerSentence, setWordsPerSentence] = useState(2);
+  const [sentenceMinLength, setSentenceMinLength] = useState(15);
+  const [sentenceMaxLength, setSentenceMaxLength] = useState(60);
   const { reviewFailedWords, setReviewFailedWords } = useReviewFailedWords();
 
   const { positionSamples, setPositionSamples, overallPositionSamples, setOverallPositionSamples } = usePositionSamples();
@@ -412,6 +414,8 @@ export default function TypingPractice() {
       if (settings.longTextLength !== undefined) setLongTextLength(settings.longTextLength);
       if (settings.sentenceReviewWindow !== undefined) setSentenceReviewWindow(settings.sentenceReviewWindow);
       if (settings.wordsPerSentence !== undefined) setWordsPerSentence(settings.wordsPerSentence);
+      if (settings.sentenceMinLength !== undefined) setSentenceMinLength(settings.sentenceMinLength);
+      if (settings.sentenceMaxLength !== undefined) setSentenceMaxLength(settings.sentenceMaxLength);
     }
     // 모드별 상세설정 로드
     const modeKey = getModeDetailSettingsKey(mode);
@@ -426,6 +430,8 @@ export default function TypingPractice() {
         if (modeSettings.showPositionKeyboard !== undefined) setShowPositionKeyboard(modeSettings.showPositionKeyboard);
         if (modeSettings.sentenceReviewWindow !== undefined) setSentenceReviewWindow(modeSettings.sentenceReviewWindow);
         if (modeSettings.wordsPerSentence !== undefined) setWordsPerSentence(modeSettings.wordsPerSentence);
+        if (modeSettings.sentenceMinLength !== undefined) setSentenceMinLength(modeSettings.sentenceMinLength);
+        if (modeSettings.sentenceMaxLength !== undefined) setSentenceMaxLength(modeSettings.sentenceMaxLength);
       }
     }
   }, [mode, isSoundEnabled, toggleSound]);
@@ -1043,6 +1049,8 @@ export default function TypingPractice() {
         selectedModel,
         previousSentencesPoolRef.current.length > 0 ? previousSentencesPoolRef.current : existingSentences,
         wordsPerSentence,
+        sentenceMinLength,
+        sentenceMaxLength,
       );
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -1733,7 +1741,7 @@ export default function TypingPractice() {
 
   const saveSentenceDefaults = () => {
     saveDetailSettings("detailSettings_sentences", {
-      speechRate, displayFontSize, rankFontSize, showText, isSoundEnabled, sentenceReviewWindow, wordsPerSentence,
+      speechRate, displayFontSize, rankFontSize, showText, isSoundEnabled, sentenceReviewWindow, wordsPerSentence, sentenceMinLength, sentenceMaxLength,
     });
     alert("문장모드 상세설정이 기본값으로 저장되었습니다.");
   };
@@ -2112,6 +2120,10 @@ export default function TypingPractice() {
     onSentenceReviewWindowChange: setSentenceReviewWindow,
     wordsPerSentence,
     onWordsPerSentenceChange: setWordsPerSentence,
+    sentenceMinLength,
+    onSentenceMinLengthChange: setSentenceMinLength,
+    sentenceMaxLength,
+    onSentenceMaxLengthChange: setSentenceMaxLength,
     useRandomSentences,
     sequentialSpeed,
     sequentialSpeechRate,

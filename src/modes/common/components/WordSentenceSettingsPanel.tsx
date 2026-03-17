@@ -25,6 +25,10 @@ type WordSentenceSettingsPanelProps = {
   onSentenceReviewWindowChange: (window: number) => void;
   wordsPerSentence: number;
   onWordsPerSentenceChange: (n: number) => void;
+  sentenceMinLength: number;
+  onSentenceMinLengthChange: (n: number) => void;
+  sentenceMaxLength: number;
+  onSentenceMaxLengthChange: (n: number) => void;
 };
 
 export default function WordSentenceSettingsPanel({
@@ -52,6 +56,10 @@ export default function WordSentenceSettingsPanel({
   onSentenceReviewWindowChange,
   wordsPerSentence,
   onWordsPerSentenceChange,
+  sentenceMinLength,
+  onSentenceMinLengthChange,
+  sentenceMaxLength,
+  onSentenceMaxLengthChange,
 }: WordSentenceSettingsPanelProps) {
   if (!(isWordLikeMode || mode === "sentences")) return null;
 
@@ -143,6 +151,35 @@ export default function WordSentenceSettingsPanel({
               className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <span className="text-xs text-gray-500">개</span>
+          </div>
+        )}
+        {mode === "sentences" && (
+          <div className="col-span-2 flex items-center gap-1">
+            <label className="text-xs whitespace-nowrap">한 문장 글자수</label>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={sentenceMinLength}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                if (!isNaN(val) && val >= 1) onSentenceMinLengthChange(val);
+              }}
+              className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <span className="text-xs text-gray-500">~</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={sentenceMaxLength}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                if (!isNaN(val) && val >= 1) onSentenceMaxLengthChange(val);
+              }}
+              className="w-14 px-1 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <span className="text-xs text-gray-500">자</span>
           </div>
         )}
         {mode === "sentences" && (
