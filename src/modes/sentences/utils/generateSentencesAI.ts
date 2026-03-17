@@ -11,11 +11,13 @@ export async function generateSentencesStream(
   preferredModel?: string,
   _previousSentences?: string[],
   wordsPerSentence?: number,
+  sentenceMinLength?: number,
+  sentenceMaxLength?: number,
 ): Promise<void> {
   const response = await fetch("/api/generate-sentences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ words, count, apiKey, style, preferredModel, wordsPerSentence }),
+    body: JSON.stringify({ words, count, apiKey, style, preferredModel, wordsPerSentence, sentenceMinLength, sentenceMaxLength }),
     signal,
   });
 

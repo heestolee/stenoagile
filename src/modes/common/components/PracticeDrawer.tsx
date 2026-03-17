@@ -40,6 +40,10 @@ type Props = {
   onSentenceReviewWindowChange: (window: number) => void;
   wordsPerSentence: number;
   onWordsPerSentenceChange: (n: number) => void;
+  sentenceMinLength: number;
+  onSentenceMinLengthChange: (n: number) => void;
+  sentenceMaxLength: number;
+  onSentenceMaxLengthChange: (n: number) => void;
   useRandomSentences: boolean;
   sequentialSpeed: number;
   sequentialSpeechRate: number;
@@ -104,6 +108,10 @@ export default function PracticeDrawer({
   onSentenceReviewWindowChange,
   wordsPerSentence,
   onWordsPerSentenceChange,
+  sentenceMinLength,
+  onSentenceMinLengthChange,
+  sentenceMaxLength,
+  onSentenceMaxLengthChange,
   sequentialSpeed,
   sequentialSpeechRate,
   inputFontSize,
@@ -174,6 +182,10 @@ export default function PracticeDrawer({
               onSentenceReviewWindowChange={onSentenceReviewWindowChange}
               wordsPerSentence={wordsPerSentence}
               onWordsPerSentenceChange={onWordsPerSentenceChange}
+              sentenceMinLength={sentenceMinLength}
+              onSentenceMinLengthChange={onSentenceMinLengthChange}
+              sentenceMaxLength={sentenceMaxLength}
+              onSentenceMaxLengthChange={onSentenceMaxLengthChange}
             />
           )}
 

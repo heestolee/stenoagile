@@ -14,6 +14,8 @@ export type DetailSettings = {
   showPositionKeyboard?: boolean;
   sentenceReviewWindow?: number;
   wordsPerSentence?: number;
+  sentenceMinLength?: number;
+  sentenceMaxLength?: number;
 };
 
 export const GLOBAL_DETAIL_SETTINGS_KEY = "detailSettings";
