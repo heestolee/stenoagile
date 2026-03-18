@@ -9,7 +9,7 @@ type WordSentencePracticeStatusProps = {
   totalCount: number;
   lastResult: { kpm: number; cpm: number };
   modeResultsLength: number;
-  averageResult: { avgKpm: number; avgCpm: number };
+  averageResult: { avgKpm: number; avgCpm: number; avgChars: number };
   elapsedTimerRef: RefObject<HTMLSpanElement | null>;
   preReviewProgress: number;
   preReviewTotal: number;
@@ -58,6 +58,7 @@ export default function WordSentencePracticeStatus({
           <div className="flex items-center space-x-4 text-xs text-gray-600">
             <span>평균 타수: {averageResult.avgKpm}/분</span>
             <span>평균 자수: {averageResult.avgCpm}/분</span>
+            <span>평균 글자수: {averageResult.avgChars}자</span>
           </div>
         )}
       </div>
