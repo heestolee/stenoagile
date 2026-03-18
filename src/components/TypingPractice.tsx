@@ -1505,11 +1505,13 @@ export default function TypingPractice() {
   // 평균 결과 (JSX에서 여러 번 쓰일 수 있으므로 useMemo로 1회만 계산)
   const averageResult = useMemo(() => {
     const stats = computeSessionStats(modeResults);
-    if (!stats) return { avgKpm: 0, avgCpm: 0, avgTime: 0 };
+    if (!stats) return { avgKpm: 0, avgCpm: 0, avgTime: 0, avgChars: 0 };
+    const totalChars = modeResults.reduce((sum, r) => sum + countNonSpaceChars(r.chars), 0);
     return {
       avgKpm: stats.avgKpmRounded,
       avgCpm: stats.avgCpmRounded,
-      avgTime: Math.round(stats.totalElapsedTime / stats.totalResults)
+      avgTime: Math.round(stats.totalElapsedTime / stats.totalResults),
+      avgChars: Math.round(totalChars / stats.totalResults * 10) / 10,
     };
   }, [modeResults]);
 
@@ -1517,8 +1519,13 @@ export default function TypingPractice() {
   const recentAverageResult = useMemo(() => {
     const recent = modeResults.slice(-50);
     const stats = computeSessionStats(recent);
-    if (!stats) return { avgKpm: 0, avgCpm: 0 };
-    return { avgKpm: stats.avgKpmRounded, avgCpm: stats.avgCpmRounded };
+    if (!stats) return { avgKpm: 0, avgCpm: 0, avgChars: 0 };
+    const totalChars = recent.reduce((sum, r) => sum + countNonSpaceChars(r.chars), 0);
+    return {
+      avgKpm: stats.avgKpmRounded,
+      avgCpm: stats.avgCpmRounded,
+      avgChars: Math.round(totalChars / recent.length * 10) / 10,
+    };
   }, [modeResults]);
 
   // 화면에 표시될 글자
